@@ -1,0 +1,7 @@
+soteria-agent
+soteria-agent.exe
+dist/
+*.log
+.env
+.env.*
+!.env.example

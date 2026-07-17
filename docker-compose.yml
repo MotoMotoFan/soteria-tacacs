@@ -1,0 +1,147 @@
+# =============================================================================
+# docker-compose.yml - Soteria TACACS+ full stack (core services)
+# =============================================================================
+# Company:    Pathfinder Insights
+# Engineer:   MotoMotoFan
+# Project:    Soteria AAA Infrastructure
+# =============================================================================
+# Core services we own: tac_plus-ng (soteria), the management agent, the web
+# frontend, and BIND9 DNS. The dependencies (Supabase, Keycloak, OpenBao, and a
+# TLS-terminating reverse proxy) are stood up separately by install.sh on the
+# same `soteria-net` network - see docs/dependencies.md.
+#
+# Quick start:
+#   cp .env.example .env    # or run ./install.sh which fills secrets in for you
+#   docker compose up -d --build
+# =============================================================================
+
+name: soteria-tacacs
+
+services:
+  # --------------------------------------------------------------------------
+  # tac_plus-ng TACACS+ daemon
+  # --------------------------------------------------------------------------
+  soteria:
+    build:
+      context: ./tacacs
+      dockerfile: Dockerfile
+    image: soteria-tacacs/tacacs:latest
+    container_name: soteria-tacacs
+    hostname: soteria-tacacs
+    restart: unless-stopped
+    ports:
+      - "${TACACS_LISTEN_PORT:-49}:49/tcp"
+      - "${TACACS_TLS_PORT:-300}:300/tcp"    # only used when ENABLE_TLS=true
+    environment:
+      - TZ=${TZ:-UTC}
+    env_file: [.env]
+    volumes:
+      - tacacs-logs:/var/log/tac_plus
+      - tacacs-config:/etc/tac_plus-ng           # shared with the agent
+      # - ./tls:/etc/tac_plus-ng/tls:ro          # mount when ENABLE_TLS=true
+    networks: [soteria-net]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -tlnp | grep -q ':49'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt: [ "no-new-privileges:true" ]
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  # --------------------------------------------------------------------------
+  # Management agent (REST API the frontend/apps call). Also drives BIND9 and
+  # restarts the TACACS container via the Docker socket.
+  # --------------------------------------------------------------------------
+  soteria-agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    image: soteria-tacacs/agent:latest
+    container_name: soteria-agent
+    hostname: soteria-agent
+    restart: unless-stopped
+    ports:
+      - "${AGENT_LISTEN_PORT:-8081}:8081/tcp"
+    environment:
+      - TZ=${TZ:-UTC}
+    env_file: [.env]
+    volumes:
+      - tacacs-config:/etc/tac_plus-ng
+      - tacacs-logs:/var/log/tac_plus:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # container control (restart/SIGHUP)
+      - ./dns/config:/bind9/config                      # BIND9 config (shared with bind9)
+      - ./dns/zones:/bind9/zones                        # BIND9 zones (shared with bind9)
+    depends_on:
+      soteria:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [soteria-net]
+    security_opt: [ "no-new-privileges:true" ]
+    logging: { driver: json-file, options: { max-size: "5m", max-file: "3" } }
+
+  # --------------------------------------------------------------------------
+  # BIND9 authoritative DNS (managed by the agent).
+  # --------------------------------------------------------------------------
+  bind9:
+    image: internetsystemsconsortium/bind9:9.20
+    container_name: bind9
+    hostname: bind9
+    restart: unless-stopped
+    ports:
+      - "${DNS_LISTEN_ADDR:-0.0.0.0}:53:53/tcp"
+      - "${DNS_LISTEN_ADDR:-0.0.0.0}:53:53/udp"
+    volumes:
+      - ./dns/config:/etc/bind
+      - ./dns/zones:/var/lib/bind
+    networks: [soteria-net]
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: "5m", max-file: "3" } }
+
+  # --------------------------------------------------------------------------
+  # Web frontend (nginx serving the SPA + proxying agent/supabase/keycloak).
+  # Put a TLS-terminating reverse proxy (nginx/Cloudflare) in front of this.
+  # --------------------------------------------------------------------------
+  soteria-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_AGENT_URL: ${VITE_AGENT_URL:-/agent}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-/supabase}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    image: soteria-tacacs/frontend:latest
+    container_name: soteria-frontend
+    hostname: soteria-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_LISTEN_PORT:-8080}:80/tcp"
+    environment:
+      - AGENT_UPSTREAM=${AGENT_UPSTREAM:-soteria-agent:8081}
+      - SUPABASE_UPSTREAM=${SUPABASE_UPSTREAM:-kong:8000}
+      - KEYCLOAK_UPSTREAM=${KEYCLOAK_UPSTREAM:-keycloak:8080}
+    depends_on:
+      soteria-agent:
+        condition: service_healthy
+    networks: [soteria-net]
+    security_opt: [ "no-new-privileges:true" ]
+    logging: { driver: json-file, options: { max-size: "5m", max-file: "3" } }
+
+networks:
+  # Shared network. The dependency stacks (Supabase/Keycloak/OpenBao/nginx) join
+  # this so the frontend can proxy to `kong`/`keycloak` by name. install.sh
+  # creates it; mark it external if a dependency compose owns it.
+  soteria-net:
+    name: soteria-net
+    driver: bridge
+
+volumes:
+  tacacs-logs:
+    driver: local
+  tacacs-config:
+    driver: local

@@ -1,0 +1,69 @@
+# =============================================================================
+# Soteria Frontend nginx site - serves the SPA and proxies the backends.
+# Replicates the Vite dev-server proxy (see frontend/vite.config.ts) so the
+# browser/phone uses ONE origin (no CORS, no mixed content over the tunnel).
+# Upstreams come from env (envsubst): AGENT_UPSTREAM, SUPABASE_UPSTREAM,
+# KEYCLOAK_UPSTREAM. Put a TLS-terminating reverse proxy (nginx/Cloudflare) in
+# front of this in production.
+# =============================================================================
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Mobile connection discovery (emitted into the build). Always fresh so the
+    # anon key can be rotated centrally.
+    location = /connect-info.json {
+        add_header Cache-Control "no-store" always;
+        try_files /connect-info.json =404;
+    }
+
+    # Soteria agent REST API.
+    location /agent/ {
+        proxy_pass http://${AGENT_UPSTREAM}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;   # commit / tools / dns scans can be slow
+    }
+
+    # Self-hosted Supabase (Kong gateway). WebSocket upgrade for realtime.
+    location /supabase/ {
+        proxy_pass http://${SUPABASE_UPSTREAM}/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Keycloak IdP for OIDC/SSO. Serves under /keycloak (KC_HTTP_RELATIVE_PATH),
+    # so no path rewrite; forward the real host/proto so it builds public URLs.
+    location /keycloak/ {
+        proxy_pass http://${KEYCLOAK_UPSTREAM}/keycloak/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # SPA fallback (client-side routing).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Long-cache the hashed assets; never cache index.html.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    location = /index.html {
+        add_header Cache-Control "no-store" always;
+    }
+}

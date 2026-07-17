@@ -1,0 +1,26 @@
+- GNU make
+- a recent C compiler, preferably CLANG
+- libpcre2 development headers + libraries
+- libc-ares development headers + libraries, for case DNS reverse lookups
+- openssl 3.x development headers + libraries, for TLS/DTLS support
+- Perl. Plus a couple of modules: 
+  - Authen::Simple::RADIUS
+  - Crypt::Passwd::XS
+  - Data::Radius
+  - File::Temp
+  - Getopt::Long
+  - Net::Frame::Simple
+  - Net::Frame::Layer::IPv4
+  - Net::Frame::Layer::IPv6
+  - Net::Frame::Layer::UDP
+  - Net::IP
+  - Net::RawIP
+  - Net::Write::Layer
+  - Net::Write::Layer3
+  - Net::LDAP
+  - Net::TacacsPlus
+  - Sys::Syslog
+  - POSIX
+  (and possibly some I've missed to add)
+- Python (optional)
+

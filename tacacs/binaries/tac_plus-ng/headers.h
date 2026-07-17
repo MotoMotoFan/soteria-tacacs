@@ -1,0 +1,925 @@
+/*
+   Copyright (C) 1999-2022 Marc Huber (Marc.Huber@web.de)
+
+   All rights reserved.
+
+   Redistribution and use in source and binary  forms,  with or without
+   modification, are permitted provided  that  the following conditions
+   are met:
+
+   1. Redistributions of source code  must  retain  the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+   2. Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions  and  the following disclaimer in
+      the  documentation  and/or  other  materials  provided  with  the
+      distribution.
+
+   3. The end-user documentation  included with the redistribution,  if
+      any, must include the following acknowledgment:
+
+          This product includes software developed by Marc Huber
+	  (Marc.Huber@web.de).
+
+      Alternately,  this  acknowledgment  may  appear  in  the software
+      itself, if and wherever such third-party acknowledgments normally
+      appear.
+
+   THIS SOFTWARE IS  PROVIDED  ``AS IS''  AND  ANY EXPRESSED OR IMPLIED
+   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+   IN NO EVENT SHALL  ITS  AUTHOR  BE  LIABLE FOR ANY DIRECT, INDIRECT,
+   INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+   BUT NOT LIMITED  TO,  PROCUREMENT OF  SUBSTITUTE  GOODS OR SERVICES;
+   LOSS OF USE,  DATA,  OR PROFITS;  OR  BUSINESS INTERRUPTION) HOWEVER
+   CAUSED AND ON ANY THEORY OF LIABILITY,  WHETHER IN CONTRACT,  STRICT
+   LIABILITY,  OR TORT  (INCLUDING NEGLIGENCE OR OTHERWISE)  ARISING IN
+   ANY WAY OUT OF THE  USE  OF  THIS  SOFTWARE,  EVEN IF ADVISED OF THE
+   POSSIBILITY OF SUCH DAMAGE.
+ */
+/* 
+   Copyright (c) 1995-1998 by Cisco systems, Inc.
+
+   Permission to use, copy, modify, and distribute this software for
+   any purpose and without fee is hereby granted, provided that this
+   copyright and permission notice appear on all copies of the
+   software and supporting documentation, the name of Cisco Systems,
+   Inc. not be used in advertising or publicity pertaining to
+   distribution of the program without specific prior permission, and
+   notice be given in supporting documentation that modification,
+   copying and distribution is by permission of Cisco Systems, Inc.
+
+   Cisco Systems, Inc. makes no representations about the suitability
+   of this software for any purpose.  THIS SOFTWARE IS PROVIDED ``AS
+   IS'' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING,
+   WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+   FITNESS FOR A PARTICULAR PURPOSE.
+*/
+
+/* $Id: headers.h,v 1.427 2021/09/26 06:48:53 marc Exp marc $ */
+
+#ifndef __HEADERS_H_
+#define __HEADERS_H_
+
+#include "misc/sysconf.h"
+
+#include <ctype.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <limits.h>
+#include <pwd.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <syslog.h>
+#include <time.h>
+#include <unistd.h>
+#include <sysexits.h>
+#include <setjmp.h>
+#include "protocol_tacacs.h"
+#include "protocol_radius.h"
+#include "config_radius.h"
+
+#ifdef WITH_PCRE2
+#include <pcre2.h>
+#endif
+
+#include "misc/radix.h"
+#include "misc/rb.h"
+#include "misc/io_sched.h"
+#include "misc/sig_segv.h"
+#include "misc/setproctitle.h"
+#include "misc/memops.h"
+#include "mavis/set_proctitle.h"
+#include "mavis/mavis.h"
+#include "misc/net.h"
+
+#ifdef WITH_DNS
+#include "misc/io_dns_revmap.h"
+#endif
+
+#ifndef MD5_LEN
+#define MD5_LEN           16
+#endif
+
+struct context;
+struct tac_acl;
+
+struct realm;
+typedef struct realm tac_realm;
+
+struct pwdat {
+    enum token type;
+    char value[1];
+};
+
+#define TRISTATE_DUNNO	0
+#define TRISTATE_YES	1
+#define TRISTATE_NO	2
+#define BISTATE_YES	1
+#define BISTATE_NO	0
+#define BISTATE(A) u_int A:1
+#define TRISTATE(A) u_int A:2
+
+struct tac_key {
+    struct tac_key *next;
+    int len;
+    u_int line;			/* configuration file line number */
+    time_t warn;
+    char *key;
+    enum token keytype;
+};
+
+struct tac_host;
+typedef struct tac_host tac_host;
+
+struct log_item {
+    enum token token;
+    char *text;
+    str_t separator;
+    struct log_item *next;
+};
+
+enum user_message_enum { UM_PASSWORD = 0, UM_RESPONSE, UM_PASSWORD_OLD, UM_PASSWORD_NEW, UM_PASSWORD_ABORT, UM_PASSWORD_AGAIN,
+    UM_PASSWORD_NOMATCH, UM_PASSWORD_MINREQ, UM_PERMISSION_DENIED, UM_ENABLE_PASSWORD, UM_PASSWORD_CHANGE_DIALOG, UM_PASSWORD_CHANGED,
+    UM_BACKEND_FAILED, UM_CHANGE_PASSWORD, UM_ACCOUNT_EXPIRES, UM_PASSWORD_INCORRECT, UM_RESPONSE_INCORRECT,
+    UM_USERNAME, UM_USER_ACCESS_VERIFICATION, UM_DENIED_BY_ACL, UM_PASSWORD_EXPIRED, UM_PASSWORD_EXPIRES, UM_MAVIS_PARSE_ERROR, UM_MAX
+};
+
+#define TAC_NAME_ATTRIBUTES str_t name
+
+struct memlist;
+typedef struct memlist memlist_t;
+
+struct tac_tags;
+struct tac_tag;
+typedef struct tac_tags tac_tags;
+typedef struct tac_tag tac_tag;
+struct mem;
+typedef struct mem mem_t;
+
+#ifdef WITH_SSL
+struct fingerprint {
+    enum token type;
+    union {
+	u_char hash[SHA256_DIGEST_LENGTH];
+	struct {
+	    u_char *rpk;
+	    size_t rpk_len;
+	};
+    };
+    union {
+	tac_host *host;
+	struct fingerprint *next;
+    };
+};
+#endif
+
+struct tac_host {
+    TAC_NAME_ATTRIBUTES;
+    u_int line;			/* configuration file line number */
+    struct {
+	TRISTATE(anon_enable);	/* permit anonymous enable */
+	TRISTATE(lookup_revmap_nac);	/* lookup reverse mapping in DNS */
+	TRISTATE(lookup_revmap_nas);	/* lookup reverse mapping in DNS */
+	TRISTATE(authfallback);	/* authentication fallback permitted? */
+	TRISTATE(single_connection);	/* single-connection permitted? */
+	TRISTATE(cleanup_when_idle);	/* cleanup context when idle */
+	TRISTATE(augmented_enable);	/* one-step enable for $enab.* user */
+	TRISTATE(map_pap_to_login);
+	TRISTATE(authz_if_authc);
+	TRISTATE(try_mavis);
+	BISTATE(complete);
+	BISTATE(visited);
+	BISTATE(skip_parent_script);
+#ifdef WITH_SSL
+	TRISTATE(tls_peer_cert_san_validation);
+#endif
+    } __attribute__((__packed__));
+    tac_host *parent;
+    tac_realm *target_realm;
+    mem_t *mem;
+    struct tac_key *key;
+    struct tac_key *radius_key;
+    struct log_item *motd;
+    struct log_item *welcome_banner;	/* prompt */
+    struct log_item *welcome_banner_fallback;	/* fallback prompt */
+    struct log_item *reject_banner;
+    struct log_item *authfail_banner;
+    struct pwdat **enable;
+    tac_tags *tags;
+    int tcp_timeout;		/* tcp connection idle timeout */
+    int udp_timeout;		/* udp connection idle timeout */
+    int session_timeout;	/* session idle timeout */
+    int context_timeout;	/* shell context idle timeout */
+    int dns_timeout;
+    int authen_max_attempts;	/* maximum number of password retries per session */
+    int max_rounds;		/* maximum number of packet exchanges */
+    tac_realm *realm;
+    struct mavis_action *action;
+    char **user_messages;
+    time_t password_expiry_warning;
+    u_int bug_compatibility;
+    u_int debug;
+#ifdef WITH_SSL
+    char *tls_psk_id;
+    u_char *tls_psk_key;
+    size_t tls_psk_key_len;
+    struct fingerprint *fingerprint;	// set via MAVIS
+    enum token tls_peer_cert_validation;
+    u_char tls_client_cert_type[2];
+    u_char tls_server_cert_type[2];
+    size_t tls_client_cert_type_len;
+    size_t tls_server_cert_type_len;
+    char *type6key;
+#endif
+};
+
+struct tac_net;
+typedef struct tac_net tac_net;
+
+struct tac_net {
+    TAC_NAME_ATTRIBUTES;
+    u_int line;			/* configuration file line number */
+    enum token res;		/* permit or deny */
+    tac_net *parent;
+    radixtree_t *nettree;
+    struct {
+	BISTATE(user_local);
+	BISTATE(visited);
+    } __attribute__((__packed__));
+};
+
+enum pw_ix { PW_LOGIN = 0, PW_PAP, PW_CHAP, PW_MSCHAP, PW_LOGIN_FALLBACK, PW_PAP_FALLBACK, PW_MAVIS };
+
+enum hint_enum { hint_failed = 0, hint_denied, hint_nopass, hint_expired, hint_nosuchuser, hint_succeeded, hint_permitted, hint_no_cleartext,
+    hint_backend_error, hint_denied_profile, hint_failed_password_retry, hint_bug, hint_abort, hint_denied_by_acl,
+    hint_invalid_challenge_length, hint_weak_password, hint_badsecret, hint_error, hint_max
+};
+
+struct tac_groups;
+struct tac_group;
+typedef struct tac_groups tac_groups;
+typedef struct tac_group tac_group;
+
+struct tac_profile {
+    TAC_NAME_ATTRIBUTES;
+    mem_t *mem;
+    struct tac_profile *parent;
+    struct pwdat **enable;
+    struct mavis_action *acl;
+    struct mavis_action *action;
+    tac_realm *realm;
+    struct {
+	TRISTATE(hushlogin);
+	BISTATE(complete);
+	BISTATE(visited);
+	BISTATE(skip_parent_script);
+	BISTATE(dynamic);
+    } __attribute__((__packed__));
+    u_int line;			/* configuration file line number */
+    u_int debug;		/* debug flags */
+};
+
+struct ssh_key;
+struct ssh_key_id;
+struct tac_alias;
+typedef struct tac_alias tac_alias;
+
+/* A user definition. */
+typedef struct {
+    TAC_NAME_ATTRIBUTES;
+    char *msg;			/* message for this user */
+    u_int line;			/* line number defined on */
+    time_t valid_from;		/* validity period start */
+    time_t valid_until;		/* validity period end */
+    time_t dynamic;		/* caching timeout. Always 0 for static users */
+    struct pwdat **enable;
+    struct pwdat *passwd[PW_MAVIS + 1];
+    struct ssh_key *ssh_key;
+    struct ssh_key_id *ssh_key_id;
+    tac_groups *groups;
+    tac_tags *tags;
+    mem_t *mem;
+    tac_realm *realm;
+    tac_alias *alias;
+    u_int debug;		/* debug flags */
+    struct {
+	TRISTATE(chalresp);
+	TRISTATE(hushlogin);
+	BISTATE(passwd_oneshot);
+	BISTATE(fallback_only);
+	BISTATE(rewritten_only);
+    } __attribute__((__packed__));
+    av_ctx *avc;
+    struct tac_profile *profile;
+    rb_tree_t *nettable;
+    rb_tree_t *timespectable;
+} tac_user;
+
+struct tac_alias {
+    TAC_NAME_ATTRIBUTES;
+    u_int line;
+    tac_user *user;
+    tac_alias *next;
+};
+
+struct rad_dacl {
+    TAC_NAME_ATTRIBUTES;
+    u_int line;			/* configuration file line number */
+    time_t dynamic;		/* caching timeout. Always 0 for static dacls */
+    tac_realm *realm;
+    str_t prefix;
+    mem_t *mem;
+    char *data;
+    uint32_t version;
+    uint32_t nace;
+    struct iovec ace[1];
+};
+
+struct config {
+    mode_t mask;		/* file mask */
+    str_t hostname;
+    int retire;			/* die after <retire> invocations */
+    int ctx_lru_threshold;	/* purge lru context if number reached */
+    time_t suicide;		/* when to commit suicide */
+    tac_realm *default_realm;	/* actually the one called "default" */
+    uint32_t syslog_filter;
+    int dscp;
+};
+
+struct tac_acl {
+    TAC_NAME_ATTRIBUTES;
+    struct mavis_action *action;
+     BISTATE(visited);
+};
+
+struct tac_rule {
+    struct tac_rule *next;
+    u_int enabled:1;
+    struct tac_acl acl;
+};
+
+struct sni_list;
+
+struct realm {
+    TAC_NAME_ATTRIBUTES;
+    u_int line;			/* configuration file line number */
+    rb_tree_t *acctlog;
+    rb_tree_t *accesslog;
+    rb_tree_t *authorlog;
+    rb_tree_t *connlog;
+    rb_tree_t *rad_accesslog;
+    rb_tree_t *rad_acctlog;
+    rb_tree_t *usertable;
+    rb_tree_t *aliastable;
+    rb_tree_t *profiletable;
+    rb_tree_t *acltable;
+    rb_tree_t *logdestinations;
+    rb_tree_t *rewrite;
+    rb_tree_t *groups_by_name;
+    rb_tree_t *hosttable;
+    rb_tree_t *nettable;
+    rb_tree_t *timespectable;
+    rb_tree_t *realms;
+    rb_tree_t *dacls;
+    rb_tree_t *dns_tree_a;
+    radixtree_t *hosttree;
+    tac_realm *parent;
+    mavis_ctx *mcx;
+    struct log_item *mavis_custom_attr[S_custom_3 - S_custom_0 + 1];
+    struct tac_rule *rules;
+    tac_host *default_host;
+    struct {
+	BISTATE(complete);
+
+	TRISTATE(chalresp);	/* enable challenge-response authentication */
+	TRISTATE(chalresp_noecho);	/* enable local echo for response */
+	TRISTATE(chpass);	/* enable password change dialogue */
+	TRISTATE(mavis_userdb);	/* use MAVIS for user authentication, too */
+	TRISTATE(mavis_noauthcache);	/* don't do backend password caching */
+	TRISTATE(mavis_pap);
+	TRISTATE(mavis_login);
+	TRISTATE(mavis_mschap);
+	TRISTATE(mavis_pap_prefetch);
+	TRISTATE(mavis_login_prefetch);
+	TRISTATE(mavis_mschap_prefetch);
+	TRISTATE(script_profile_parent_first);
+	TRISTATE(script_host_parent_first);
+	TRISTATE(script_realm_parent_first);
+	TRISTATE(haproxy_autodetect);
+
+	TRISTATE(allowed_protocol_radius_udp);
+	TRISTATE(allowed_protocol_radius_tcp);
+	TRISTATE(allowed_protocol_radius_tls);
+	TRISTATE(allowed_protocol_radius_dtls);
+	TRISTATE(allowed_protocol_tacacs_tcp);
+	TRISTATE(allowed_protocol_tacacs_tls);
+
+	BISTATE(use_tls_psk);
+	BISTATE(visited);
+	BISTATE(skip_parent_script);
+#ifdef WITH_SSL
+	TRISTATE(tls_accept_expired);
+	TRISTATE(tls_autodetect);
+	TRISTATE(tls_sni_required);
+#endif
+    } __attribute__((__packed__));
+    int dns_caching_period;	/* dns caching period */
+    time_t dnspurge_last;
+    int caching_period;		/* user caching period */
+    int warning_period;		/* password expiration warning period */
+    int backend_failure_period;
+    struct tac_acl *mavis_user_acl;
+    struct tac_acl *enable_user_acl;
+    struct tac_acl *password_acl;
+    time_t last_backend_failure;
+#ifdef WITH_PCRE2
+    pcre2_code *password_minimum_requirement;
+#endif
+#ifdef WITH_SSL
+    SSL_CTX *tls;
+    SSL_CTX *dtls;
+    SSL_CTX *tls_psk;
+    SSL_CTX *dtls_psk;
+    char *tls_cert;
+    char *tls_key;
+    char *tls_pass;
+    char *tls_ciphers;
+    char *tls_cafile;
+    int tls_verify_depth;
+    struct sni_list *sni_list;
+    u_char *alpn_vec;
+    size_t alpn_vec_len;
+    rb_tree_t *fingerprints;
+    char *tls_psk_hint;
+    str_t crl_basedir;
+#endif
+    u_int debug;
+    int rulecount;
+    struct io_dns_ctx *idc;
+    radixtree_t *dns_tree_ptr[3];	// 0: static, 1-2: dynamic
+};
+
+struct tac_session;
+typedef struct tac_session tac_session;
+
+
+struct radius_data {
+    enum token type;
+    str_t device_dns_name;
+    str_t device_addr_ascii;
+    struct in6_addr device_addr;
+    struct rad_dacl *dacl;
+    rad_pak_hdr *pak_in;
+    size_t pak_in_len;
+    size_t data_len;
+    union {
+	rad_pak_hdr pak;
+	u_char data[4096];
+    };
+};
+
+union pak_hdr {
+    tac_pak_hdr tac;
+    rad_pak_hdr rad;
+    u_char uchar[1];
+};
+
+struct tac_pak {
+    struct tac_pak *next;
+    ssize_t offset;
+    ssize_t length;
+    time_t delay_until;
+    union pak_hdr pak;
+};
+
+typedef struct tac_pak tac_pak;
+typedef struct rad_pak rad_pak;
+
+struct author_data {
+    char *admin_msg;		/* admin message (optional) */
+    int status;			/* return status */
+    int in_cnt;			/* input arg count */
+    char **in_args;		/* input arguments */
+    int out_cnt;		/* output arg cnt */
+    char **out_args;		/* output arguments */
+    int is_shell;
+    int is_cmd;
+};
+
+struct authen_data {
+    u_char *data;
+    size_t data_len;
+    char *msg;
+    size_t msg_len;
+    int iterations;
+};
+
+struct mavis_data;
+struct mavis_ctx_data;
+struct autonumber;
+
+typedef struct tac_profile tac_profile;
+
+struct tac_session {
+    struct context *ctx;
+    mem_t *mem;
+    tac_user *user;
+    tac_host *host;
+    struct in6_addr nac_address;	/* host byte order */
+    str_t username;
+    str_t username_orig;
+    str_t msg;
+    str_t user_msg;
+    str_t port;
+    str_t nac_addr_ascii;
+    str_t nac_dns_name;		/* DNS reverse mapping for NAC */
+    str_t action;
+    str_t service;
+    str_t protocol;
+    str_t hint;
+    str_t cmdline;
+    str_t message;		// to the user
+    str_t label;
+    str_t *rulename;
+    str_t *type;
+    str_t *authen_action;
+    str_t *authen_type;
+    str_t *authen_service;
+    str_t *authen_method;
+    str_t *msgid;
+    str_t *result;
+    str_t *acct_type;
+
+    struct radius_data *radius_data;
+
+    u_char arg_cnt;
+    u_char *arg_len;
+    u_char *argp;
+    u_char arg_out_cnt;
+    u_char *arg_out_len;
+    u_char *argp_out;
+    u_int priv_lvl;		/* requested privilege level */
+    char *password;
+    char *password_new;
+    char *password_bad;
+    char *challenge;
+    char *motd;
+    char *welcome_banner;
+    char *ssh_key_hash;
+    char *ssh_key_id;
+    int session_id;
+    time_t session_timeout;
+    struct author_data *author_data;
+    struct authen_data *authen_data;
+    struct mavis_data *mavis_data;
+    struct pwdat *enable;
+    struct autonumber *autonumber;
+    tac_profile *profile;
+    union {
+	u_char mschap_version;
+	u_char chap_pppid;
+    };
+    u_char *chap_response;
+    size_t chap_response_len;
+    u_char *chap_challenge;
+    size_t chap_challenge_len;
+    struct {
+	BISTATE(nac_addr_valid);
+	BISTATE(flag_mavis_info);
+	BISTATE(flag_mavis_auth);
+	BISTATE(flag_chalresp);
+	BISTATE(mavis_pending);
+	BISTATE(revmap_pending);
+	BISTATE(revmap_timedout);
+	BISTATE(enable_getuser);
+	BISTATE(password_bad_again);
+	BISTATE(passwd_mustchange);
+	BISTATE(passwd_changeable);
+	BISTATE(user_is_session_specific);
+	BISTATE(username_rewritten);
+	BISTATE(chpass);
+	BISTATE(authorized);
+	BISTATE(eval_log_raw);
+    } __attribute__((__packed__));
+    enum token mavisauth_res;
+    u_int authfail_delay;
+    u_int debug;
+    u_char seq_no;		/* seq. no. of last packet exchanged */
+    u_char version;
+    u_char pak_authen_type;
+    u_char pak_authen_method;
+    void (*authfn)(tac_session *);
+    void (*resumefn)(tac_session *);
+    char **attrs_m;		/* mandatory */
+    char **attrs_o;		/* optional (from NAS) */
+    char **attrs_a;		/* add optional (to NAS) */
+    int cnt_m;
+    int cnt_o;
+    int cnt_a;
+    enum token attr_dflt;
+    time_t password_expiry;
+    u_long mavis_latency;
+};
+
+struct user_profile_cache {
+    tac_user *user;
+    tac_profile *profile;
+    time_t valid_until;
+    enum token res;
+    uint32_t crc32;
+};
+
+struct context {
+    int sock;			/* socket for this connection */
+    io_context_t *io;
+    tac_host *host;
+    tac_pak *in;
+    tac_pak *out;
+    tac_pak *delayed;
+    mem_t *mem;			/* memory pool */
+    rb_tree_t *sessions;
+    rb_tree_t *shellctxcache;
+    tac_realm *realm;
+    struct mavis_ctx_data *mavis_data;
+
+    str_t device_dns_name;	// device
+    str_t device_addr_ascii;
+    str_t device_port_ascii;
+    struct in6_addr device_addr;	// for binary comparisions, in host byte order
+
+    str_t server_addr_ascii;
+    str_t server_port_ascii;
+
+    str_t proxy_addr_ascii;	// .txt == NULL if not proxied
+
+    str_t peer_addr_ascii;	// TCP/UDP peer
+    str_t peer_port_ascii;
+
+    u_char flags;
+    union pak_hdr hdr;
+    ssize_t hdroff;
+    struct tac_key *key;
+    time_t last_io;
+    struct radius_data *radius_data;
+#ifdef WITH_SSL
+    SSL *tls;
+    str_t tls_conn_version;
+    str_t tls_conn_cipher;
+    str_t tls_peer_cert_issuer;
+    str_t tls_peer_cert_aki;
+    str_t tls_peer_cert_subject;
+    str_t tls_conn_cipher_strength;
+    str_t tls_peer_cn;
+    str_t tls_peer_serial;
+    str_t tls_psk_identity;
+    str_t tls_sni;
+    char **tls_peer_cert_san;
+    size_t tls_peer_cert_san_count;
+    BIO *rbio;
+    struct fingerprint *fingerprint;
+#endif
+    u_int tls_versions;
+
+    str_t *msgid;
+    str_t *acct_type;
+    str_t vrf;
+#define USER_PROFILE_CACHE_SIZE 8
+    char *hint;
+    struct user_profile_cache user_profile_cache[USER_PROFILE_CACHE_SIZE];
+    struct {
+#ifdef WITH_SSL
+	TRISTATE(alpn_passed);
+	BISTATE(sni_passed);
+	BISTATE(fingerprint_matched);
+#endif
+	TRISTATE(cleanup_when_idle);	/* cleanup context when idle */
+	BISTATE(unencrypted_flag);	/* not MD5 encrypted? */
+	BISTATE(single_connection_flag);	/* single-connection enabled? */
+	BISTATE(single_connection_test);	/* single-connection capable, but not telling? */
+	BISTATE(single_connection_did_warn);
+	BISTATE(dying);
+	BISTATE(key_fixed);
+	BISTATE(revmap_pending);
+	BISTATE(revmap_timedout);
+	BISTATE(use_tls);
+	BISTATE(use_dtls);
+	BISTATE(mavis_pending);
+	BISTATE(mavis_tried);
+	BISTATE(rad_acct);
+	BISTATE(reset_tcp);
+	BISTATE(udp);
+	BISTATE(radius_1_1);
+	BISTATE(use_tls_psk);
+    } __attribute__((__packed__));
+    enum token mavis_result;
+    enum token aaa_protocol;
+    u_int id;
+    u_int debug;
+    u_long mavis_latency;
+#define INJECT_BUF_SIZE 5000
+    u_char *inject_buf;
+    size_t inject_len;
+    size_t inject_off;
+    struct context *lru_prev;
+    struct context *lru_next;
+};
+
+struct logfile;
+
+struct context_logfile {
+    int fd;
+    io_context_t *io;
+    struct buffer *buf;
+    pid_t pid;
+    int dying;
+    struct logfile *lf;
+    char path[1];		/* current log file name */
+};
+
+void cleanup(struct context *, int);
+void reject_conn(struct context *ctx, const char *hint, const char *func, int line);
+
+/* acct.c */
+void accounting(tac_session *, tac_pak_hdr *);
+void rad_acct(tac_session *);
+
+/* report.c */
+#define LOGID_AUTH	1
+#define LOG_INFO_AUTH	(LOG_INFO | (LOGID_AUTH << 3))
+#define LOGID_CERT	2
+#define LOG_INFO_CERT	(LOG_INFO | (LOGID_CERT << 3))
+#define LOGID_CONN	3
+#define LOG_INFO_CONN	(LOG_INFO | (LOGID_CONN << 3))
+#define LOGID_KEY	4
+#define LOG_INFO_KEY	(LOG_INFO | (LOGID_KEY << 3))
+#define LOGID_MAVIS	5
+#define LOG_INFO_MAVIS	(LOG_INFO | (LOGID_MAVIS << 3))
+#define LOGID_SINGLECONNECT	6
+#define LOG_INFO_SINGLECONNECT	(LOG_INFO | (LOGID_SINGLECONNECT << 3))
+#define LOGID_MAX	7
+void report_string(tac_session *, int, int, char *, char *, int);
+void report_hex(tac_session *, int, int, u_char *, int);
+void report(tac_session *, int, int, char *, ...)
+    __attribute__((format(printf, 4, 5)));
+
+/* packet.c */
+void send_authen_reply(tac_session *, int, char *, int, u_char *, int, u_char);
+void send_authen_error(tac_session *, char *, ...) __attribute__((format(printf, 2, 3)));
+void send_acct_reply(tac_session *, u_char, char *, char *);
+void send_author_reply(tac_session *, u_char, char *, char *, int, char **);
+void rad_send_authen_reply(tac_session *, u_char, char *);
+void rad_send_acct_reply(tac_session * session);
+void rad_send_error(tac_session * session, uint32_t cause);
+
+int tac_exit(int) __attribute__((noreturn));
+
+void log_exec(tac_session *, struct context *, enum token, time_t);
+void log_add(struct sym *, rb_tree_t **, char *, tac_realm *);
+int logs_flushed(tac_realm *);
+
+/* dump.c */
+char *summarise_outgoing_packet_type(tac_pak_hdr *);
+void dump_nas_pak(tac_session *, int);
+void dump_tacacs_pak(tac_session *, tac_pak_hdr *);
+void dump_rad_pak(tac_session *, rad_pak_hdr *);
+
+/* authen.c */
+void authen(tac_session *, tac_pak_hdr *);
+void rad_authen(tac_session *);
+void authen_init(void);
+
+/* author.c */
+void author(tac_session *, tac_pak_hdr *);
+enum token author_eval_host(tac_session * session, tac_host * h, int parent_first);
+enum token author_eval_profile(tac_session * session, tac_profile * p, int parent_first);
+
+
+/* config.c */
+int cfg_get_enable(tac_session *, struct pwdat **);
+
+void parse_decls(struct sym *);
+void parse_user_final(tac_user *);
+int parse_user_profile_fmt(struct sym *, tac_user *, char *, ...);
+int parse_host_profile(struct sym *, tac_realm *, tac_host *);
+int parse_dacl_fmt(struct sym *sym, tac_session * session, tac_realm * r, char *s);
+
+void parse_log(struct sym *, tac_realm *);
+char *eval_log_format(tac_session *, struct context *, struct logfile *, struct log_item *, time_t, size_t *);
+str_t *eval_log_format_privlvl(tac_session *, struct context *, struct logfile *);
+struct log_item *parse_log_format_inline(char *, char *, int);
+
+tac_user *new_user(char *, enum token, tac_realm *);
+int compare_name(const void *, const void *);
+void free_user(tac_user *);
+void cfg_init(void);
+enum token tac_keycode(char *);
+enum token eval_ruleset(tac_session *, tac_realm *);
+
+static __inline__ int minimum(int a, int b)
+{
+    return (a < b) ? a : b;
+}
+
+void tac_read(struct context *, int);
+void tac_write(struct context *, int);
+void rad_read(struct context *, int);
+
+int rad_get_password(tac_session * session, char **val, size_t *val_len);
+
+void rad_udp_inject(struct context *);
+ssize_t recv_inject(struct context *ctx, void *buf, size_t len, int flags, enum io_status *status);
+
+void cleanup_session(tac_session *);
+struct log_item *parse_log_format(struct sym *, mem_t *);
+
+void mavis_lookup(tac_session *, void (*)(tac_session *), const char *const, enum pw_ix);
+void mavis_dacl_lookup(tac_session *, void (*)(tac_session *), const char *const);
+void mavis_ctx_lookup(struct context *, void (*)(struct context *), const char *const);
+tac_user *lookup_user(tac_session *);
+mavis_ctx *lookup_mcx(tac_realm *);
+tac_realm *lookup_realm(char *, tac_realm *);
+radixtree_t *lookup_hosttree(tac_realm *);
+
+struct revmap {
+    time_t ttl;
+    char *name;
+};
+
+void get_revmap_nac(tac_session *);
+void get_revmap_nas(tac_session *);
+void add_revmap(tac_realm *, struct in6_addr *, char *, int, int);
+void free_reverse(void *, void *);
+void resume_session(tac_session *, int);
+void get_pkt_data(tac_session *, struct authen_start *, struct author *);
+
+enum token tac_script_eval_r(tac_session *, struct mavis_action *);
+void tac_script_expire_exec_context(struct context *);
+void tac_script_set_exec_context(tac_session *, char *);
+char *tac_script_get_exec_context(tac_session *);
+enum token eval_tac_acl(tac_session *, struct tac_acl *);
+tac_host *lookup_host(char *, tac_realm *);
+
+#define ACSACL "#ACSACL#"
+struct rad_dacl *lookup_dacl(char *, tac_realm *);
+int rad_check_dacl(tac_session *);
+int rad_attr_add_dacl(tac_session * session, struct rad_dacl *dacl, uint32_t * i);
+
+int query_mavis_info(tac_session *, void (*)(tac_session *), enum pw_ix);
+void expire_dynamic_users(tac_realm *);
+void expire_dynamic_acls(tac_realm *);
+void drop_mcx(tac_realm *);
+void init_mcx(tac_realm *);
+void complete_host(tac_host *);
+void complete_realm(tac_realm *);
+
+void attr_add(tac_session *, char ***, int *, char *, size_t);
+
+enum token validate_ssh_hash(tac_session *, char *, char **);
+enum token validate_ssh_key_id(tac_session *);
+
+tac_realm *lookup_sni(const char *, size_t, tac_realm *, char **, size_t *);
+
+void eval_args(tac_session *, u_char *, u_char *, size_t);
+
+void init_host(tac_host *, tac_host *, tac_realm *, int);
+
+void context_lru_append(struct context *);
+
+void users_dec(void);
+
+void update_bio(struct context *);
+
+ssize_t sendto_spoof(sockaddr_union * from_addr, sockaddr_union * dest_addr, void *buf, size_t len);
+void dump_hex(u_char * data, size_t data_len, char **buf);
+
+int compare_fingerprint(const void *a, const void *b);
+struct fingerprint *lookup_fingerprint(struct context *ctx);
+
+extern struct config config;
+extern int die_when_idle;
+
+#define CLIENT_BUG_INVALID_START_DATA	0x01
+#define CLIENT_BUG_BAD_VERSION		0x02
+#define CLIENT_BUG_TLS_OBFUSCATED	0x04
+#define CLIENT_BUG_HEADER_LENGTH	0x08
+#define CLIENT_BUG_INVALID_REMOTE_ADDRESS	0x10
+#define CLIENT_BUG_NO_MESSAGE_AUTHENTICATOR	0x20
+#define CLIENT_BUG_NOT_OBFUSCATED	0x40
+#define CLIENT_BUG_BAD_TLS_VERSION	0x80
+
+char *check_client_bug_invalid_remote_address(tac_session *);
+
+#endif				/* __HEADERS_H_ */
+/*
+ * vim:ts=4
+ */

@@ -1,0 +1,17 @@
+// Zones served by this authoritative server.
+
+zone "soteria.local" {
+    type master;
+    file "/var/lib/bind/db.soteria.local";
+};
+
+// Reverse for 192.168.1.0/24
+zone "1.168.192.in-addr.arpa" {
+    type master;
+    file "/var/lib/bind/db.192.168.1";
+};
+
+zone "1.250.10.in-addr.arpa" {
+    type master;
+    file "/var/lib/bind/db.1.250.10.in-addr.arpa";
+};

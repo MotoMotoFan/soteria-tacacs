@@ -1,0 +1,96 @@
+#!/usr/local/sbin/tac_plus-ng
+id = spawnd {
+	listen = { port = 49 }
+	spawn = {
+		instances min = 1
+		instances max = 10
+	}
+	background = yes
+}
+
+id = tac_plus-ng {
+	# access log = /var/log/tac_plus-ng/access/%Y%m%d.log
+	# accounting log = /var/log/tac_plus-ng/acct/%Y%m%d.log
+
+	# mavis module = groups {
+	# 	groups filter = /^(admins|guest|readonly)$/ # these are defined below
+	# 	memberof filter = /^CN=tacacs_/ # enforce prefix
+	# }
+
+
+	mavis module = external {
+		setenv LDAP_HOSTS = "https://172.16.0.10:3269"
+		setenv LDAP_BASE = "dc=example,dc=local"
+		setenv LDAP_USER = "tacacs@example.local"
+		setenv LDAP_PASSWD = "password"
+		#
+		# Filtering the memberOf results is highly recommended, e.g.:
+		# setenv LDAP_MEMBEROF_REG>EX = "^cn=tacacs_([^,]+),.*"
+		# 
+		# Also, recursive memberOf lookups can be limited. Example:
+		# setenv LDAP_NESTED_GROUP_DEPTH = 3
+		#
+		# See the comments at the start of
+		exec = /usr/local/lib/mavis/mavis_tacplus-ng_ldap.pl
+		# for further environment variables.
+		#
+	}
+
+	login backend = mavis
+	user backend = mavis
+	pap backend = mavis
+
+	device world {
+		address = ::/0
+		welcome banner = "Welcome\n"
+		enable 15 = clear secret
+		key = demo
+	}
+
+	profile admins {
+		script {
+			if (service == shell) {
+				if (cmd == "")
+					set priv-lvl = 15
+				permit
+			}
+		}
+	}
+
+	profile guest {
+		enable = deny
+		script {
+			if (service == shell) {
+				if (cmd == "")
+					set priv-lvl = 1
+				permit
+			}
+		}
+	}
+
+	group admins
+	group guest
+
+	user demo {
+		password login = clear demo
+		member = admins
+	}
+
+	user = readonly {
+		password login = clear readonly
+		member = guest
+	}
+	ruleset {
+		rule {
+			script { 
+				if (memberof =~ /^CN=tacacs_admins,/) { profile = admins permit }
+				if (memberof =~ /^CN=tacacs_readonly,/) { profile = guest permit }
+			}
+		}
+		rule {
+			script { 
+				if (member == guest) { profile = guest permit }
+			}
+		}
+	}
+}

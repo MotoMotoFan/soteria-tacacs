@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+# Deployment-specific dev-server allowed hosts (managed via `npm run hosts`)
+allowed-hosts.json

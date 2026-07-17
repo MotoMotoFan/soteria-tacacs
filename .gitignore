@@ -1,0 +1,40 @@
+# =============================================================================
+# .gitignore - Soteria TACACS+ monorepo
+# Keep ALL real secrets and build artifacts out of git.
+# =============================================================================
+
+# Secrets / environment (only *.example is tracked)
+.env
+.env.local
+*.env
+!.env.example
+!*/.env.example
+
+# TLS material and private keys (certs are public, but keys never ship)
+tls/
+**/*.key
+**/*.jks
+**/*.keystore
+**/rndc.key
+**/session.key
+
+# Node / frontend
+**/node_modules/
+frontend/dist/
+frontend/allowed-hosts.json
+frontend/tsconfig.tsbuildinfo
+
+# Go
+agent/bin/
+*.test
+*.out
+
+# Editor / OS / tooling
+.claude/
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# BIND runtime journals (zone files themselves ARE tracked as samples)
+dns/zones/*.jnl

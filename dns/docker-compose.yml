@@ -1,0 +1,24 @@
+# BIND9 authoritative DNS for the Soteria lab.
+#   - Forward zone:  soteria.local
+#   - Reverse zone:  192.168.1.0/24 (1.168.192.in-addr.arpa) PTR records
+# Authoritative only (recursion disabled). Bound to the host LAN IP so it does
+# not collide with systemd-resolved's loopback stub on 127.0.0.53.
+services:
+  bind9:
+    image: internetsystemsconsortium/bind9:9.20
+    container_name: bind9
+    hostname: bind9
+    restart: unless-stopped
+    # -g: run in foreground and log to stderr (so `docker logs bind9` works).
+    command: ["-g", "-c", "/etc/bind/named.conf"]
+    ports:
+      - "192.168.1.160:53:53/udp"
+      - "192.168.1.160:53:53/tcp"
+    volumes:
+      - ./config:/etc/bind:ro
+      - ./zones:/var/lib/bind:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M

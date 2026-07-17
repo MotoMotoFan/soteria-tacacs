@@ -1,0 +1,341 @@
+################################################################################
+# GNU Makefile for MAVIS
+# (C) 1997-2008 by Marc Huber <Marc.Huber@web.de>
+################################################################################
+
+include $(BASE)/Makefile.inc
+
+PROG	= mavis
+
+CFLAGS	+= $(DEFCRYPT)
+
+LIB_MAVIS_LIB += $(LIB_SSL) $(LIB_PCRE) $(LIB_EXECINFO) $(LIB_CURL) $(LIB_DNS) $(LIB_TLS)
+INC += $(INC_PCRE) $(INC_EXECINFO) $(INC_SSL) $(INC_EXECINFO) $(INC_CURL) $(INC_TLS)
+
+VPATH = $(BASE)/mavis:$(BASE)/misc
+CFLAGS += $(DEF) $(INC)
+
+################################################################################
+
+%$(SHLIB_EXT): CFLAGS += $(CFLAGS_PIC)
+
+LIBVER_MAJOR = 0
+LIBVER_MINOR = 1
+
+MAVIS_LIB = $(SHLIB_PRE)mavis$(SHLIB_EXT)
+
+M = $(INSTALLROOT)$(LIBARCHDIR_DEST)/mavis
+
+INSTALL_MAVIS_PRG = install_mavistest
+
+ifeq ($(WITH_PAM),1)
+	MAVIS_LIBNAMES += pam
+	MAVIS_PRG += pammavis
+	INSTALL_MAVIS_PRG += install_pammavis
+	ifeq ($(WITH_PTHREAD),1)
+		MAVIS_PRG += pammavis-mt
+		INSTALL_MAVIS_PRG += install_pammavis-mt
+	endif
+endif
+
+WITH_RADMAVIS=0
+ifeq ($(WITH_FREERADIUS_CLIENT),1)
+	LIB_RADCLI=
+	INC_RADCLI=
+	WITH_RADMAVIS=1
+	CFLAGS += -DWITH_FREERADIUS_CLIENT
+endif
+
+ifeq ($(WITH_RADCLI),1)
+	LIB_FREERADIUS_CLIENT=
+	INC_FREERADIUS_CLIENT=
+	WITH_RADMAVIS=1
+	CFLAGS += -DWITH_RADCLI
+endif
+
+ifeq ($(WITH_RADMAVIS),1)
+	MAVIS_PRG += radmavis
+	INSTALL_MAVIS_PRG += install_radmavis
+	ifeq ($(WITH_PTHREAD),1)
+		MAVIS_PRG += radmavis-mt
+		INSTALL_MAVIS_PRG += install_radmavis-mt
+	endif
+endif
+
+ifeq ($(WITH_LDAP),1)
+	ifeq ($(WITH_PTHREAD),1)
+		MAVIS_PRG += ldapmavis-mt
+		INSTALL_MAVIS_PRG += install_ldapmavis-mt
+	endif
+endif
+
+ifeq ($(WITH_EXECINFO),1)
+	CFLAGS += -DHAVE_EXECINFO_H
+endif
+
+MAVIS_LIBNAMES += remote system groups anonftp asciiftp limit
+MAVIS_LIBNAMES += cache auth log external userdb tee null tacinfo_cache
+MAVIS_LIBNAMES += tacauth_limit
+ifeq ($(WITH_PTHREAD),1)
+	MAVIS_LIBNAMES += external-mt
+endif
+
+MAVIS_LIBS = $(patsubst %,libmavis_%.so, $(MAVIS_LIBNAMES))
+
+MAVIS_PRG += mavistest$(EXEC_EXT)
+
+ALL = $(MAVIS_LIB) $(MAVIS_PRG) $(MAVIS_LIBS)
+
+all:	$(ALL) install_stage
+
+mavistest$(EXEC_EXT): mavistest.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB_MAVIS) $(LIB) $(LIB_NET)
+
+radmavis-mt.o: INC += $(INC_FREERADIUS_CLIENT) $(INC_RADCLI)
+
+radmavis-mt$(EXEC_EXT): radmavis-mt.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB_MAVIS) $(LIB) $(LIB_PTHREAD) $(LIB_FREERADIUS_CLIENT) $(LIB_RADCLI) $(LIB_NET)
+
+ldapavis-mt.o: INC += $(INC_LDAP)
+
+ldapmavis-mt$(EXEC_EXT): ldapmavis-mt.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB_MAVIS) $(LIB) $(LIB_PTHREAD) $(LIB_LDAP) $(LIB_LBER) $(LIB_NET) $(LIB_PCRE)
+
+radmavis.o: INC += $(INC_FREERADIUS_CLIENT) $(INC_RADCLI)
+
+radmavis$(EXEC_EXT): radmavis.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB) $(LIB_FREERADIUS_CLIENT) $(LIB_RADCLI) $(LIB_NET)
+
+pammavis.o: CFLAGS += $(INC_PAM)
+
+pammavis.o: $(BASE)/misc/version.h
+
+pammavis$(EXEC_EXT): pammavis.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB_MAVIS) $(LIB) $(LIB_PAM) $(LIB_NET)
+
+pammavis-mt.o: CFLAGS += $(INC_PAM)
+
+pammavis-mt.o: $(BASE)/misc/version.h
+
+pammavis-mt$(EXEC_EXT): pammavis-mt.o $(MAVIS_LIB)
+	$(CC) -o $@ $^ $(LIB_MAVIS) $(LIB) $(LIB_PTHREAD) $(LIB_PAM) $(LIB_NET)
+
+spawnd_main.o: $(BASE)/misc/version.h
+
+LIBMAVISOBJS	+= libmavis.o log.o debug.o blowfish.o radix.o
+LIBMAVISOBJS	+= net.o scm.o groups.o rbtree.o crc32.o tokenize.o base64.o
+LIBMAVISOBJS	+= memops.o ostype.o io_sched.o mavis_parse.o token.o
+LIBMAVISOBJS	+= setproctitle.o mymd5.o mymd4.o io_child.o set_proctitle.o
+LIBMAVISOBJS	+= spawnd_accepted.o spawnd_conf.o spawnd_main.o
+LIBMAVISOBJS	+= spawnd_scm_spawn.o spawnd_signals.o pid_write.o
+LIBMAVISOBJS	+= sig_segv.o md5crypt.o av_send.o utf16.o
+
+ifeq ($(WITH_DNS), 1)
+	LIBMAVISOBJS += io_dns_revmap.o
+endif
+
+$(LIBMAVISOBJS): mavis.h
+
+mavis_parse.o: CFLAGS += -DMAVIS_DIR="\"$(LIBARCHDIR_DEST)/mavis\""
+
+ifeq ($(OSTYPE), darwin)
+	LD_SHARED_APPEND = -undefined dynamic_lookup
+
+$(MAVIS_LIB): $(LIBMAVISOBJS) mavis.h
+	$(LD_SHARED) -o $@ $(LIBMAVISOBJS) $(LIB_MAVIS_LIB) $(LIB_DL) -install_name @rpath/$(MAVIS_LIB)
+
+else 
+  ifeq ($(OSTYPE), cygwin_nt)
+	LD_SHARED_APPEND = -L. -lmavis
+
+
+$(MAVIS_LIB): $(LIBMAVISOBJS) mavis.h
+	$(LD_SHARED) -o $@ -Wl,--out-implib=$@.a -Wl,--export-all-symbols -Wl,--enable-auto-import -Wl,--whole-archive $(LIBMAVISOBJS) -Wl,--no-whole-archive $(LIB_MAVIS_LIB)
+
+  else
+$(MAVIS_LIB).$(LIBVER_MAJOR).$(LIBVER_MINOR): $(LIBMAVISOBJS) mavis.h
+	$(LD_SHARED) -o $@ $(LIBMAVISOBJS) $(LIB_MAVIS_LIB) $(LIB_DL)
+
+$(MAVIS_LIB).$(LIBVER_MAJOR): $(MAVIS_LIB).$(LIBVER_MAJOR).$(LIBVER_MINOR)
+	rm -f $@ ; ln $^ $@ ; true
+
+$(MAVIS_LIB): $(MAVIS_LIB).$(LIBVER_MAJOR)
+	rm -f $@ ; ln $^ $@ ; true
+
+  endif
+endif
+
+libmavis_system.o: libmavis_system.c mavis_glue.c
+
+libmavis_system.so: libmavis_system.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LIB_CRYPT) $(LD_SHARED_APPEND)
+ 
+libmavis_groups.o: libmavis_groups.c mavis_glue.c
+
+libmavis_groups.so: libmavis_groups.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+ 
+libmavis_remote.o: libmavis_remote.c mavis_glue.c
+
+libmavis_remote.so: libmavis_remote.o blowfish.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_anonftp.o: libmavis_anonftp.c mavis_glue.c
+
+libmavis_anonftp.so: libmavis_anonftp.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_external.o: libmavis_external.c mavis_glue.c
+
+libmavis_external.so: libmavis_external.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_external-mt.o: libmavis_external-mt.c mavis_glue.c
+
+libmavis_external-mt.so: libmavis_external-mt.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_userdb.o: libmavis_userdb.c mavis_glue.c
+
+libmavis_userdb.so: libmavis_userdb.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LIB_CRYPT) $(LD_SHARED_APPEND)
+
+libmavis_tee.so: libmavis_tee.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_tacinfo_cache.so: libmavis_tacinfo_cache.o tohex.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_tacauth_limit.so: libmavis_tacauth_limit.o tohex.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_limit.o: libmavis_limit.c mavis_glue.c
+
+libmavis_limit.so: libmavis_limit.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_cache.o: libmavis_cache.c mavis_glue.c
+
+libmavis_cache.so: libmavis_cache.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_asciiftp.o: libmavis_asciiftp.c mavis_glue.c
+
+libmavis_asciiftp.so: libmavis_asciiftp.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_log.o: libmavis_log.c mavis_glue.c $(MAVIS_LIB)
+
+libmavis_log.so: libmavis_log.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_pam.o: CFLAGS += $(INC_PAM)
+
+libmavis_pam.o: libmavis_pam.c mavis_glue.c
+
+libmavis_pam.so: libmavis_pam.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LIB_PAM) $(LD_SHARED_APPEND)
+
+libmavis_auth.o: libmavis_auth.c mavis_glue.c
+
+libmavis_auth.so: libmavis_auth.o tohex.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+libmavis_null.o: libmavis_null.c mavis_glue.c
+
+libmavis_null.so: libmavis_null.o $(MAVIS_LIB)
+	$(LD_SHARED) -o $@ $^ $(LD_SHARED_APPEND)
+
+clean:
+	rm -f *.o *.so $(MAVIS_LIB).$(LIBVER_MAJOR) $(MAVIS_LIB).$(LIBVER_MAJOR).$(LIBVER_MINOR) cyg*.dll *~ *.a core mavistest
+
+install: install_lib install_libs install_prg install_perl install_python
+
+$(INSTALLROOT)$(LIBARCHDIR_DEST)/$(MAVIS_LIB).$(LIBVER_MAJOR).$(LIBVER_MINOR): $(MAVIS_LIB)
+	$(INSTALL) -m 0755 $< $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.$(LIBVER_MAJOR).$(LIBVER_MINOR) ;\
+	ln -s $<.$(LIBVER_MAJOR).$(LIBVER_MINOR) $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.$(LIBVER_MAJOR).new ;	\
+	ln -s $<.$(LIBVER_MAJOR) $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.new ;\
+	mv $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.$(LIBVER_MAJOR).new $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.$(LIBVER_MAJOR) ; \
+	mv $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<.new $(INSTALLROOT)$(LIBARCHDIR_DEST)/$<
+
+$(INSTALLROOT)$(LIBARCHDIR_DEST):
+	@mkdir -p -m 0755 $@
+
+ifeq ($(OSTYPE), cygwin_nt)
+$(INSTALLROOT)$(BINDIR_DEST)/$(MAVIS_LIB): $(MAVIS_LIB)
+	$(INSTALL) -m 0755 $< $@
+
+install_lib: $(INSTALLROOT)$(BINDIR_DEST) $(INSTALLROOT)$(BINDIR_DEST)/$(MAVIS_LIB)
+
+else
+install_lib: $(INSTALLROOT)$(LIBARCHDIR_DEST) $(INSTALLROOT)$(LIBARCHDIR_DEST)/$(MAVIS_LIB).$(LIBVER_MAJOR).$(LIBVER_MINOR)
+
+endif
+
+$(M):
+	@mkdir -p -m 0755 $@
+
+IL = $(patsubst %,$(M)/libmavis_%.so, $(MAVIS_LIBNAMES))
+
+$(IL): $(M)/%.so: %.so
+	$(INSTALL) -m 0755 $< $@
+
+install_libs: $(M) $(IL)
+
+$(INSTALLROOT)$(BINDIR_DEST):
+	@mkdir -p -m 0755 $@
+
+$(INSTALLROOT)$(SBINDIR_DEST):
+	@mkdir -p -m 0755 $@
+
+$(INSTALLROOT)$(BINDIR_DEST)/mavistest$(EXEC_EXT): mavistest$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+install_mavistest: $(INSTALLROOT)$(BINDIR_DEST) $(INSTALLROOT)$(BINDIR_DEST)/mavistest$(EXEC_EXT)
+
+$(INSTALLROOT)$(SBINDIR_DEST)/pammavis$(EXEC_EXT): pammavis$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+$(INSTALLROOT)$(SBINDIR_DEST)/pammavis-mt$(EXEC_EXT): pammavis-mt$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+$(INSTALLROOT)$(SBINDIR_DEST)/radmavis-mt$(EXEC_EXT): radmavis-mt$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+$(INSTALLROOT)$(SBINDIR_DEST)/ldapmavis-mt$(EXEC_EXT): ldapmavis-mt$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+install_pammavis: $(INSTALLROOT)$(SBINDIR_DEST) $(INSTALLROOT)$(SBINDIR_DEST)/pammavis$(EXEC_EXT)
+
+install_pammavis-mt: $(INSTALLROOT)$(SBINDIR_DEST) $(INSTALLROOT)$(SBINDIR_DEST)/pammavis-mt$(EXEC_EXT)
+
+$(INSTALLROOT)$(SBINDIR_DEST)/radmavis$(EXEC_EXT): radmavis$(EXEC_EXT)
+	$(INSTALL) -m 0755 $< $@
+
+install_radmavis: $(INSTALLROOT)$(SBINDIR_DEST) $(INSTALLROOT)$(SBINDIR_DEST)/radmavis$(EXEC_EXT)
+
+install_radmavis-mt: $(INSTALLROOT)$(SBINDIR_DEST) $(INSTALLROOT)$(SBINDIR_DEST)/radmavis-mt$(EXEC_EXT)
+
+install_ldapmavis-mt: $(INSTALLROOT)$(SBINDIR_DEST) $(INSTALLROOT)$(SBINDIR_DEST)/ldapmavis-mt$(EXEC_EXT)
+
+install_prg: $(INSTALL_MAVIS_PRG)
+
+install_perl:
+	@$(MAKE) -C $(BASE)/mavis/perl install
+
+install_perl_stage:
+	@$(MAKE) -C $(BASE)/mavis/perl install_stage
+
+install_python:
+	@$(MAKE) -C $(BASE)/mavis/python install
+
+install_python_stage:
+	@$(MAKE) -C $(BASE)/mavis/python install_stage
+
+install_stage: install_perl_stage install_python_stage
+	@$(MAKE) -f $(BASE)/$(PROG)/Makefile.obj INSTALLROOT=$(BASE)/build/$(OS)/fakeroot install
+
+install_doc:
+	@$(MAKE) -f $(BASE)/$(PROG)/Makefile.obj -C $(BASE)/mavis/doc INSTALLROOT=$(BASE)/build/$(OS)/fakeroot install
+
+

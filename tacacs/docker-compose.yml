@@ -1,0 +1,148 @@
+# =============================================================================
+# docker-compose.yml - Soteria TACACS+ Server
+# =============================================================================
+# Company:    Pathfinder Insights
+# Engineer:   MotoMotoFan
+# Project:    Soteria AAA Infrastructure
+# =============================================================================
+# Usage:
+#   1. Copy .env.example to .env and fill in your values
+#   2. docker compose up -d --build
+#   3. docker compose logs -f soteria
+# =============================================================================
+
+services:
+  soteria:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: soteria-tacacs
+    hostname: soteria-tacacs
+    restart: unless-stopped
+
+    # ---------------------------
+    # TACACS+ port mapping
+    # ---------------------------
+    ports:
+      - "${TACACS_LISTEN_PORT:-49}:49/tcp"
+      # TLS port - only needed when ENABLE_TLS=true
+      - "${TACACS_TLS_PORT:-300}:300/tcp"
+
+    # ---------------------------
+    # Environment variables
+    # ---------------------------
+    environment:
+      - TZ=${TZ:-UTC}
+    env_file:
+      - .env
+
+    # ---------------------------
+    # Persistent volumes
+    # ---------------------------
+    volumes:
+      # AAA logs persist across container restarts and rebuilds
+      - tacacs-logs:/var/log/tac_plus
+
+      # Shared config volume - accessible by soteria and soteria-agent
+      # Entrypoint copies defaults on first run if empty
+      - tacacs-config:/etc/tac_plus-ng
+
+      # TLS certificates - required when ENABLE_TLS=true
+      # Mount a directory containing: server.crt, server.key, ca.crt
+      # - ./tls:/etc/tac_plus-ng/tls:ro
+
+    # ---------------------------
+    # Resource limits
+    # ---------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+    # ---------------------------
+    # Health check
+    # ---------------------------
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -tlnp | grep -q ':49'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # ---------------------------
+    # Logging driver
+    # ---------------------------
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # ---------------------------
+    # Security
+    # ---------------------------
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+
+  soteria-agent:
+    build:
+      context: ../soteria-agent
+      dockerfile: Dockerfile
+    container_name: soteria-agent
+    hostname: soteria-agent
+    restart: unless-stopped
+
+    # Management API consumed by soteria-frontend
+    ports:
+      - "${AGENT_LISTEN_PORT:-8081}:8081/tcp"
+
+    environment:
+      - TZ=${TZ:-UTC}
+    env_file:
+      - .env
+
+    volumes:
+      - tacacs-config:/etc/tac_plus-ng
+      # AAA logs (read-only) for the Logs API
+      - tacacs-logs:/var/log/tac_plus:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    depends_on:
+      soteria:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  tacacs-logs:
+    driver: local
+  tacacs-config:
+    driver: local

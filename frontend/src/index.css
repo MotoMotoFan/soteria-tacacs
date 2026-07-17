@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  .dark {
+    --s-bg: #0a0c1a;
+    --s-surface: #111427;
+    --s-card: #161933;
+    --s-border: #1e2247;
+    --s-hover: #232755;
+    --s-text: #c8cce5;
+    --s-muted: #6b7099;
+    --s-heading: #ffffff;
+    --s-code-bg: #0a0c1a;
+    /* Chart status colors - validated (dataviz six checks) against --s-card per mode */
+    --s-chart-success: #059669;
+    --s-chart-failure: #ef4444;
+  }
+
+  .light {
+    --s-bg: #f4f5f9;
+    --s-surface: #ffffff;
+    --s-card: #ffffff;
+    --s-border: #e0e2ed;
+    --s-hover: #edeef5;
+    --s-text: #3b3e5b;
+    --s-muted: #7e82a0;
+    --s-heading: #14163d;
+    --s-code-bg: #f0f1f7;
+    --s-chart-success: #059669;
+    --s-chart-failure: #dc2626;
+  }
+
+  body {
+    background-color: var(--s-bg);
+    color: var(--s-text);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--s-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--s-border);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #472562;
+  }
+
+  ::selection {
+    background: rgba(172, 72, 134, 0.3);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .heading {
+    color: var(--s-heading);
+  }
+
+  .glass-card {
+    background-color: var(--s-card);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--s-border);
+    @apply rounded-xl;
+  }
+
+  .glass-card-hover {
+    background-color: var(--s-card);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--s-border);
+    @apply rounded-xl transition-all duration-200;
+  }
+  .glass-card-hover:hover {
+    border-color: rgba(71, 37, 98, 0.4);
+    box-shadow: 0 10px 15px -3px rgba(71, 37, 98, 0.05);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-gradient-to-r from-brand-purple to-brand-magenta text-white font-medium rounded-lg
+           transition-all duration-200 hover:shadow-lg hover:shadow-brand-purple/25 hover:scale-[1.02]
+           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 font-medium rounded-lg transition-all duration-200 active:scale-[0.98];
+    background-color: var(--s-surface);
+    border: 1px solid var(--s-border);
+    color: var(--s-text);
+  }
+  .btn-secondary:hover {
+    border-color: rgba(71, 37, 98, 0.4);
+    background-color: var(--s-hover);
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-400 font-medium rounded-lg
+           transition-all duration-200 hover:bg-red-500/20 hover:border-red-500/30 active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 font-medium rounded-lg transition-all duration-200 active:scale-[0.98];
+    color: var(--s-muted);
+  }
+  .btn-ghost:hover {
+    color: var(--s-text);
+    background-color: var(--s-hover);
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-lg transition-all duration-200
+           focus:outline-none focus:border-brand-purple/60 focus:ring-1 focus:ring-brand-purple/30;
+    background-color: var(--s-bg);
+    border: 1px solid var(--s-border);
+    color: var(--s-text);
+  }
+  .input-field::placeholder {
+    color: var(--s-muted);
+    opacity: 0.5;
+  }
+
+  .select-field {
+    @apply w-full px-3 py-2 rounded-lg transition-all duration-200 cursor-pointer
+           focus:outline-none focus:border-brand-purple/60 focus:ring-1 focus:ring-brand-purple/30;
+    background-color: var(--s-bg);
+    border: 1px solid var(--s-border);
+    color: var(--s-text);
+  }
+  .select-field option {
+    background-color: var(--s-surface);
+    color: var(--s-text);
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-admin {
+    @apply badge bg-brand-purple/15 text-brand-magenta border border-brand-purple/20;
+  }
+
+  .badge-readonly {
+    @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20;
+  }
+
+  .badge-success {
+    @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
+  }
+
+  .badge-warning {
+    @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/20;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-500/15 text-red-400 border border-red-500/20;
+  }
+
+  .table-header {
+    @apply text-xs font-semibold uppercase tracking-wider px-4 py-3 text-left;
+    color: var(--s-muted);
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-sm;
+  }
+
+  .table-row {
+    border-top: 1px solid var(--s-border);
+    @apply transition-colors;
+  }
+  .table-row:hover {
+    background-color: var(--s-hover);
+  }
+
+  .stat-card {
+    @apply glass-card p-5;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200;
+  }
+
+  .sidebar-link-active {
+    @apply sidebar-link bg-gradient-to-r from-brand-purple/20 to-brand-magenta/10 border-l-2 border-brand-magenta;
+    color: var(--s-heading);
+  }
+
+  .sidebar-link-inactive {
+    @apply sidebar-link;
+    color: var(--s-muted);
+  }
+  .sidebar-link-inactive:hover {
+    color: var(--s-text);
+    background-color: var(--s-hover);
+  }
+
+  .config-preview {
+    @apply p-3 rounded-lg border font-mono text-xs leading-relaxed;
+    background-color: var(--s-code-bg);
+    border-color: var(--s-border);
+    color: var(--s-muted);
+  }
+}

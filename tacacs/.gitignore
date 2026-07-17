@@ -1,0 +1,25 @@
+# =============================================================================
+# .gitignore - Soteria TACACS+ Server
+# =============================================================================
+
+# Environment secrets - NEVER commit
+.env
+
+# TLS certificates and keys - NEVER commit
+tls/*.key
+tls/*.crt
+tls/*.pem
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Docker build artifacts
+*.tar
