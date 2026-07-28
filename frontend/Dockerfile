@@ -20,9 +20,14 @@ WORKDIR /app
 ARG VITE_AGENT_URL=/agent
 ARG VITE_SUPABASE_URL=/supabase
 ARG VITE_SUPABASE_ANON_KEY=
+# LAB ONLY: baking the service role key into the browser bundle enables the
+# Settings admin sections (Web UI Users / Access Groups) without a backend.
+# Leave EMPTY outside a test lab - it is a root credential for Supabase.
+ARG VITE_SUPABASE_SERVICE_ROLE_KEY=
 ENV VITE_AGENT_URL=$VITE_AGENT_URL \
     VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
-    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
+    VITE_SUPABASE_SERVICE_ROLE_KEY=$VITE_SUPABASE_SERVICE_ROLE_KEY
 
 COPY package.json package-lock.json ./
 RUN npm ci

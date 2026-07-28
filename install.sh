@@ -98,7 +98,9 @@ install_prereqs() {
 
 # ---- 2. secrets / .env -----------------------------------------------------
 gen_key() { openssl rand -hex 24; }
-hash_pw() { openssl passwd -6 "$1"; }
+# $ must be written as $$ in .env: docker compose interpolates $VAR sequences
+# inside values, which would silently mangle SHA-512 crypt hashes.
+hash_pw() { openssl passwd -6 "$1" | sed -e 's/\$/$$/g'; }
 set_env() { # set_env KEY VALUE  (idempotent in-place update of .env)
   local k="$1" v="$2"
   if grep -qE "^${k}=" "$ENV_FILE"; then

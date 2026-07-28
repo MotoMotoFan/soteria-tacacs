@@ -1,0 +1,16 @@
+$TTL 3600
+@       IN  SOA ns.soteria.lab. admin.soteria.lab. (
+                2026072801 ; Serial (managed by soteria-agent)
+                3600       ; Refresh
+                1800       ; Retry
+                604800     ; Expire
+                300 )      ; Negative cache TTL
+
+@              IN  NS  ns.soteria.lab.
+@              IN  A   192.168.1.120
+agent          IN  A   192.168.1.120
+network-tools  IN  A   192.168.1.120
+ns             IN  A   192.168.1.120
+supabase       IN  A   192.168.1.120
+tacacs         IN  A   192.168.1.120
+www            IN  A   192.168.1.120

@@ -1,13 +1,12 @@
 $TTL 3600
-@       IN  SOA ns.soteria.local. admin.soteria.local. (
-                2026070701 ; Serial - bump on every edit (YYYYMMDDnn)
+@       IN  SOA ns.soteria.lab. admin.soteria.lab. (
+                2026072801 ; Serial - bump on every edit (YYYYMMDDnn)
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
                 300 )      ; Negative cache TTL
 
-@       IN  NS  ns.soteria.local.
+@       IN  NS  ns.soteria.lab.
 
 ; ---- PTR records: <last octet> of 192.168.1.x ----
-160     IN  PTR network-tools.soteria.local.
-154     IN  PTR wazuh.soteria.local.
+120     IN  PTR soteria.lab.

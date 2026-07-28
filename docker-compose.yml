@@ -100,7 +100,6 @@ services:
       - ./dns/config:/etc/bind
       - ./dns/zones:/var/lib/bind
     networks: [soteria-net]
-    restart: unless-stopped
     logging: { driver: json-file, options: { max-size: "5m", max-file: "3" } }
 
   # --------------------------------------------------------------------------
@@ -115,6 +114,9 @@ services:
         VITE_AGENT_URL: ${VITE_AGENT_URL:-/agent}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-/supabase}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        # LAB ONLY - enables the Settings admin sections in the browser; leave
+        # empty in production (see frontend/Dockerfile).
+        VITE_SUPABASE_SERVICE_ROLE_KEY: ${VITE_SUPABASE_SERVICE_ROLE_KEY:-}
     image: soteria-tacacs/frontend:latest
     container_name: soteria-frontend
     hostname: soteria-frontend
@@ -135,10 +137,11 @@ services:
 networks:
   # Shared network. The dependency stacks (Supabase/Keycloak/OpenBao/nginx) join
   # this so the frontend can proxy to `kong`/`keycloak` by name. install.sh
-  # creates it; mark it external if a dependency compose owns it.
+  # creates it BEFORE compose runs, so it is external here (compose v5 refuses
+  # to reuse a network it did not label otherwise).
   soteria-net:
     name: soteria-net
-    driver: bridge
+    external: true
 
 volumes:
   tacacs-logs:

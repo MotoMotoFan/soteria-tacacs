@@ -1,8 +1,8 @@
 // Zones served by this authoritative server.
 
-zone "soteria.local" {
+zone "soteria.lab" {
     type master;
-    file "/var/lib/bind/db.soteria.local";
+    file "/var/lib/bind/db.soteria.lab";
 };
 
 // Reverse for 192.168.1.0/24

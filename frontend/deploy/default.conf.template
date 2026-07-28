@@ -5,6 +5,12 @@
 # Upstreams come from env (envsubst): AGENT_UPSTREAM, SUPABASE_UPSTREAM,
 # KEYCLOAK_UPSTREAM. Put a TLS-terminating reverse proxy (nginx/Cloudflare) in
 # front of this in production.
+#
+# Upstream hostnames are resolved LAZILY via Docker's embedded DNS (127.0.0.11)
+# through variable proxy_pass: a literal proxy_pass hostname is resolved at
+# config load, so nginx would refuse to start when an optional dependency
+# (kong/keycloak) is not on the network yet. With variables the frontend always
+# starts; an absent backend answers 502 instead of taking the whole UI down.
 # =============================================================================
 
 server {
@@ -13,6 +19,11 @@ server {
 
     root /usr/share/nginx/html;
     index index.html;
+
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $agent_upstream    "${AGENT_UPSTREAM}";
+    set $supabase_upstream "${SUPABASE_UPSTREAM}";
+    set $keycloak_upstream "${KEYCLOAK_UPSTREAM}";
 
     # Mobile connection discovery (emitted into the build). Always fresh so the
     # anon key can be rotated centrally.
@@ -23,7 +34,8 @@ server {
 
     # Soteria agent REST API.
     location /agent/ {
-        proxy_pass http://${AGENT_UPSTREAM}/;
+        rewrite ^/agent(/.*)$ $1 break;
+        proxy_pass http://$agent_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -33,7 +45,8 @@ server {
 
     # Self-hosted Supabase (Kong gateway). WebSocket upgrade for realtime.
     location /supabase/ {
-        proxy_pass http://${SUPABASE_UPSTREAM}/;
+        rewrite ^/supabase(/.*)$ $1 break;
+        proxy_pass http://$supabase_upstream;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -44,9 +57,10 @@ server {
     }
 
     # Keycloak IdP for OIDC/SSO. Serves under /keycloak (KC_HTTP_RELATIVE_PATH),
-    # so no path rewrite; forward the real host/proto so it builds public URLs.
+    # so the original URI is forwarded unchanged; the real host/proto headers let
+    # it build correct public URLs.
     location /keycloak/ {
-        proxy_pass http://${KEYCLOAK_UPSTREAM}/keycloak/;
+        proxy_pass http://$keycloak_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
