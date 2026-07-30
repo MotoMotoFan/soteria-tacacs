@@ -17,29 +17,25 @@ server-side stack; the native phone apps live in a separate repository.
 | `frontend/` | `soteria-frontend` | React/Vite web UI, served by nginx that also proxies the backends and emits `/connect-info.json` for the mobile apps. |
 | `dns/` | `bind9` | Authoritative DNS managed by the agent (forward + reverse zones). |
 | `compose/`, `docker-compose.yml` | orchestration | Top-level stack. |
-| `install.sh` | installer | One step-by-step script: prerequisites → secrets → network → deps → build → health. |
+| `install.sh` | installer | One script installs EVERYTHING: prerequisites → secrets (all recorded) → Supabase + OpenBao (core) → optional Keycloak/TLS proxy (asked) → build → first admin → health. |
 | `docs/` | documentation | Architecture, deployment, configuration, dependencies. |
 
-**Dependencies (stood up separately, on the same `soteria-net`):** self-hosted **Supabase** (auth +
-MFA), **Keycloak** (OIDC/SSO), **OpenBao** (secrets), and a TLS-terminating reverse proxy
-(nginx/Cloudflare). See [`docs/dependencies.md`](docs/dependencies.md).
+**Deployed automatically on the same `soteria-net`:** self-hosted **Supabase** (auth + MFA, core)
+and **OpenBao** (secrets, core); **Keycloak** (OIDC/SSO) and the **nginx TLS reverse proxy** are
+optional — the installer asks about them in real time. See
+[`docs/dependencies.md`](docs/dependencies.md).
 
 ## Quick start
 
 ```bash
 git clone <this repo> soteria-tacacs && cd soteria-tacacs
-sudo ./install.sh          # installs Docker + deps, generates secrets, builds & starts the stack
+sudo ./install.sh          # installs Docker, Supabase, OpenBao (+ asked optionals), builds & starts everything
 ```
 
-Or manually:
-
-```bash
-cp .env.example .env       # fill in secrets (or let install.sh generate them)
-docker compose up -d --build
-```
-
-Then complete Supabase/Keycloak setup ([`docs/dependencies.md`](docs/dependencies.md)) and open the
-frontend (default `http://localhost:8080/`, behind your TLS proxy in production).
+Then open `https://<your-host>/` and sign in as the first administrator the installer created
+(default `admin@soteria.lab` / `Admin@123` — **change it after first login**). Every generated
+credential is recorded in `CREDENTIALS.md` (chmod 600, gitignored). See
+[`docs/deployment.md`](docs/deployment.md) for details and flags.
 
 ## Security posture
 

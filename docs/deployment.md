@@ -9,19 +9,55 @@
 
 ## Install
 
+One command installs **everything** — core stack, Supabase and OpenBao (both core), plus the
+optionals it asks you about in real time (nginx TLS proxy, Keycloak):
+
 ```bash
 sudo ./install.sh
 ```
 
-Steps it performs (each idempotent): prerequisites -> `.env` + secret generation -> `soteria-net`
-network -> dependency check/guidance -> `docker compose up -d --build` -> health checks.
+Steps it performs (each idempotent, safe to re-run):
+
+1. **Prerequisites** — Docker Engine + Compose plugin, openssl, curl, git, python3.
+2. **Configuration & secrets** — asks the public hostname, DNS listen IP, the optional
+   components, and the first administrator credentials; generates everything else. **Every
+   credential is recorded in `CREDENTIALS.md`** (chmod 600, gitignored) — nothing is printed
+   once and lost.
+3. **`soteria-net`** shared docker network.
+4. **Supabase** (core) — cloned, configured, Kong attached to `soteria-net`, started, health-waited.
+5. **OpenBao** (core) — deployed, initialised, unsealed; KV engine `soteria-app` seeded with the
+   stack secrets. Unseal key + root token recorded.
+6. **Keycloak** (optional, asked) — deployed and bootstrapped (realm `soteria`, client
+   `soteria-frontend`), wired into GoTrue.
+7. **Core stack** — `docker compose up -d --build` (tac_plus-ng, agent, frontend, BIND9), plus the
+   optional nginx TLS proxy with a generated self-signed certificate.
+8. **First-run bootstrap** — creates the web UI tables and the **first administrator** so a fresh
+   install is immediately usable, then runs health checks.
 
 Non-interactive / partial runs:
 ```bash
-sudo ./install.sh --non-interactive   # use an existing .env, no prompts
+sudo ./install.sh --non-interactive   # no prompts; defaults: proxy yes, keycloak no
+sudo ./install.sh --with-keycloak     # force an optional on without being asked
+sudo ./install.sh --without-proxy     # force an optional off without being asked
 sudo ./install.sh --skip-prereqs      # Docker/openssl already installed
-sudo ./install.sh --skip-build        # only set up .env + network + deps
+sudo ./install.sh --skip-build        # don't (re)build the core stack images
 ```
+
+Dependency directories land beside the repo (`../supabase`, `../openbao`, `../keycloak`,
+`../nginx`); set `DEPS_DIR=/some/path` to relocate them.
+
+## First login
+
+The installer creates the first administrator — default `admin@soteria.lab` with password
+**`Admin@123`** (unless you typed your own at the prompt; either way it is in `CREDENTIALS.md`).
+The account is created with `app_metadata.role=admin`, so it has full rights immediately.
+
+1. Open `https://<your-host>/` and sign in.
+2. Enroll TOTP MFA (mandatory, prompted at first login).
+3. **Change the default password** (avatar menu → Change Password).
+4. Settings → Web UI Users to create the real users; new users default to the Read Only group.
+
+> After a host reboot, OpenBao comes back **sealed** — run `../openbao/unseal.sh` to unseal it.
 
 ## Networking & the reverse proxy
 

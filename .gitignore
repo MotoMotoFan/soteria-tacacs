@@ -38,3 +38,6 @@ agent/bin/
 
 # BIND runtime journals (zone files themselves ARE tracked as samples)
 dns/zones/*.jnl
+
+# Local credentials record (never commit)
+CREDENTIALS.md
