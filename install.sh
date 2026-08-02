@@ -28,6 +28,12 @@
 #   sudo ./install.sh --without-proxy     # force optional off (no prompt)
 #   sudo ./install.sh --skip-prereqs      # Docker/openssl already present
 #   sudo ./install.sh --skip-build        # don't (re)build the core stack
+#   sudo ./install.sh --with-localhost-san / --without-localhost-san
+#       add localhost + 127.0.0.1 to the TLS cert SANs so local origins
+#       (e.g. a Cloudflare Tunnel pointing at https://localhost) verify
+#   sudo ./install.sh --with-cert-trust / --without-cert-trust
+#       install the generated cert into the HOST trust store so local tools
+#       (cloudflared, curl, scripts) verify TLS without -k / "No TLS Verify"
 # =============================================================================
 set -euo pipefail
 
@@ -46,6 +52,7 @@ ADMIN_EMAIL_DEFAULT="admin@soteria.lab"
 ADMIN_PW_DEFAULT="Admin@123"
 
 INTERACTIVE=1; SKIP_PREREQS=0; SKIP_BUILD=0; WITH_KEYCLOAK=""; WITH_PROXY=""
+WITH_LOCAL_SAN=""; WITH_CERT_TRUST=""
 for a in "$@"; do case "$a" in
   --non-interactive)  INTERACTIVE=0 ;;
   --skip-prereqs)     SKIP_PREREQS=1 ;;
@@ -54,6 +61,10 @@ for a in "$@"; do case "$a" in
   --without-keycloak) WITH_KEYCLOAK=0 ;;
   --with-proxy)       WITH_PROXY=1 ;;
   --without-proxy)    WITH_PROXY=0 ;;
+  --with-localhost-san)    WITH_LOCAL_SAN=1 ;;
+  --without-localhost-san) WITH_LOCAL_SAN=0 ;;
+  --with-cert-trust)       WITH_CERT_TRUST=1 ;;
+  --without-cert-trust)    WITH_CERT_TRUST=0 ;;
   -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "unknown option: $a" >&2; exit 2 ;;
 esac; done
@@ -190,6 +201,10 @@ setup_env() {
   [ -z "$(get_env DNS_SERVER_IP_01)" ] && set_env DNS_SERVER_IP_01 "$lan_ip"
 
   if [ -z "$WITH_PROXY" ];    then WITH_PROXY=$(ask_yn "Deploy the nginx TLS reverse proxy (recommended)?" "y"); fi
+  if [ "$WITH_PROXY" = "1" ]; then
+    if [ -z "$WITH_LOCAL_SAN" ];  then WITH_LOCAL_SAN=$(ask_yn "Add localhost to the TLS cert SANs (lets tunnels target https://localhost)?" "y"); fi
+    if [ -z "$WITH_CERT_TRUST" ]; then WITH_CERT_TRUST=$(ask_yn "Trust the TLS cert on this host (cloudflared/curl verify without -k)?" "y"); fi
+  fi
   if [ -z "$WITH_KEYCLOAK" ]; then WITH_KEYCLOAK=$(ask_yn "Deploy Keycloak (optional OIDC / SSO)?" "n"); fi
 
   ADMIN_EMAIL=$(ask "First web UI administrator email:" "$ADMIN_EMAIL_DEFAULT")
@@ -499,12 +514,25 @@ build_up() {
       if echo "$PUBLIC_HOST" | grep -qE '^[0-9.]+$'; then san="IP:${PUBLIC_HOST}"
       else san="DNS:${PUBLIC_HOST},DNS:*.${PUBLIC_HOST}"; fi
       [ -n "$lan_ip" ] && [ "$lan_ip" != "$PUBLIC_HOST" ] && san="${san},IP:${lan_ip}"
+      if [ "$WITH_LOCAL_SAN" = "1" ]; then san="${san},DNS:localhost,IP:127.0.0.1"; fi
       openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
         -keyout "$PX_DIR/certs/soteria.lab.key" -out "$PX_DIR/certs/soteria.lab.crt" \
         -subj "/CN=${PUBLIC_HOST}/O=Pathfinder Insights Lab" \
         -addext "subjectAltName=${san}" 2>/dev/null
       chmod 600 "$PX_DIR/certs/soteria.lab.key"
       log "generated self-signed TLS cert (SAN: ${san}) - trust ${PX_DIR}/certs/soteria.lab.crt on your PC"
+    fi
+    # host trust store: lets local clients (cloudflared tunnel, curl, agents)
+    # verify the origin without -k / "No TLS Verify". Idempotent on re-runs.
+    if [ "$WITH_CERT_TRUST" = "1" ]; then
+      if [ -d /etc/pki/ca-trust/source/anchors ]; then
+        $SUDO install -m0644 "$PX_DIR/certs/soteria.lab.crt" /etc/pki/ca-trust/source/anchors/soteria-lab.crt
+        $SUDO update-ca-trust
+      else
+        $SUDO install -m0644 "$PX_DIR/certs/soteria.lab.crt" /usr/local/share/ca-certificates/soteria-lab.crt
+        $SUDO update-ca-certificates >/dev/null
+      fi
+      log "TLS cert added to the host trust store (soteria-lab.crt)"
     fi
     [ -f "$PX_DIR/nginx.conf" ] || cat > "$PX_DIR/nginx.conf" <<EOF
 # TLS-terminating reverse proxy for the Soteria stack. The frontend is the
