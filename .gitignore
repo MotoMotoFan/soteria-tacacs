@@ -41,3 +41,4 @@ dns/zones/*.jnl
 
 # Local credentials record (never commit)
 CREDENTIALS.md
+CLAUDE.md
