@@ -195,7 +195,18 @@ setup_env() {
 
   PUBLIC_HOST=$(get_env PUBLIC_HOST)
   PUBLIC_HOST=$(ask "Public hostname (or IP) for URLs and the TLS certificate:" "${PUBLIC_HOST:-$lan_ip}")
+  # This value becomes cert SANs, nginx server_name and every URL the stack
+  # advertises, so it must be a BARE host. Answering with a pasted URL is the
+  # obvious mistake ("https://host/" -> SAN "DNS:https://host", links like
+  # https://https://host/), and openssl accepts the junk silently.
+  PUBLIC_HOST=$(printf '%s' "$PUBLIC_HOST" | tr -d '[:space:]' \
+    | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' -e 's#/.*$##' -e 's#:[0-9]*$##')
+  case "$PUBLIC_HOST" in
+    ''|-*|.*|*[!a-zA-Z0-9.-]*)
+      err "invalid public host '${PUBLIC_HOST}' - give a bare hostname or IP (letters, digits, dots, hyphens)"; exit 2 ;;
+  esac
   set_env PUBLIC_HOST "$PUBLIC_HOST"
+  log "public host: ${PUBLIC_HOST}"
 
   local dns_addr; dns_addr=$(get_env DNS_LISTEN_ADDR)
   # 0.0.0.0 collides with systemd-resolved's 127.0.0.53:53 on most distros -
