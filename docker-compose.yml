@@ -127,6 +127,12 @@ services:
       - AGENT_UPSTREAM=${AGENT_UPSTREAM:-soteria-agent:8081}
       - SUPABASE_UPSTREAM=${SUPABASE_UPSTREAM:-kong:8000}
       - KEYCLOAK_UPSTREAM=${KEYCLOAK_UPSTREAM:-keycloak:8080}
+      # gate /docs/ behind the web UI login (client-side redirect; set false to
+      # make the manual public again - takes effect on container restart)
+      - DOCS_REQUIRE_LOGIN=${DOCS_REQUIRE_LOGIN:-true}
+    volumes:
+      # LaTeX manual source -> served as /docs/ (optional; see docs-entrypoint.sh)
+      - ${DOCS_SRC_DIR:-../soteria-documentation}:/docs-src:ro
     depends_on:
       soteria-agent:
         condition: service_healthy

@@ -46,5 +46,16 @@ ENV AGENT_UPSTREAM=soteria-agent:8081 \
 COPY deploy/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Documentation site: python3 + the LaTeX->HTML generator. The manual source is
+# bind-mounted at /docs-src (see docker-compose.yml); the entrypoint wrapper
+# generates /docs/ on start and watches for changes. Without the mount the
+# container serves the SPA exactly as before.
+RUN apk add --no-cache python3
+COPY docsgen /opt/docsgen
+COPY deploy/docs-entrypoint.sh /docs-entrypoint.sh
+RUN chmod +x /docs-entrypoint.sh
+ENTRYPOINT ["/docs-entrypoint.sh"]
+
 EXPOSE 80
-# nginx entrypoint handles envsubst on the template then runs nginx -g 'daemon off;'
+# wrapper builds/watches /docs then chains to the stock nginx entrypoint
+# (envsubst on the template, nginx -g 'daemon off;')
