@@ -113,12 +113,17 @@ get_env() { get_kv "$ENV_FILE" "$1"; }
 # in CREDENTIALS.md. Losing a password to a hidden prompt is not acceptable.
 cred_init() {
   [ -f "$CRED_FILE" ] && return
-  umask 077
-  cat > "$CRED_FILE" <<EOF
+  # umask is process-wide, NOT function-scoped: setting 077 here would leak
+  # into every later write, including the Supabase config tree that non-root
+  # container users have to read (kong then dies with EACCES on its
+  # entrypoint). Keep it inside a subshell.
+  ( umask 077
+    cat > "$CRED_FILE" <<EOF
 # Soteria Lab Credentials - $(hostname) ($(date -Is))
 # Written by install.sh. chmod 600, gitignored. Check HERE before asking
 # "what was the password". KEY=VALUE lines are machine-readable.
 EOF
+  )
   chmod 600 "$CRED_FILE"
 }
 cred_set() { cred_init; set_kv "$CRED_FILE" "$1" "$2"; }
@@ -262,6 +267,61 @@ ensure_network() {
   else docker network create "$NETWORK" >/dev/null && log "created network '$NETWORK'"; fi
 }
 
+# A usable Supabase database is one where the init pass has run: the service
+# roles must actually have passwords (postgres itself gets its password from
+# initdb, so 'db is healthy' proves nothing about the rest).
+supabase_db_initialised() {
+  docker exec supabase-db pg_isready -U postgres >/dev/null 2>&1 || return 1
+  local n
+  n=$(docker exec supabase-db psql -U postgres -tAc \
+      "select count(*) from pg_authid where rolname='authenticator' and rolpassword is not null" 2>/dev/null | tr -d ' ')
+  [ "$n" = "1" ]
+}
+
+# Wait for that init; if it was interrupted (see the note at the call site),
+# replay exactly what postgres skipped instead of leaving a stack that only
+# fails at runtime. Everything here is idempotent, so re-runs are safe.
+wait_supabase_db() {
+  local i=0
+  until supabase_db_initialised; do
+    i=$((i+1)); [ "$i" -gt 40 ] && break
+    sleep 3
+  done
+  if supabase_db_initialised; then log "database initialised (service roles have passwords)"; return; fi
+
+  warn "database initialisation was incomplete - replaying the skipped scripts"
+  local f
+  for f in migrations/97-_supabase.sql migrations/99-logs.sql migrations/99-pooler.sql \
+           migrations/99-realtime.sql init-scripts/98-webhooks.sql \
+           init-scripts/99-roles.sql init-scripts/99-jwt.sql; do
+    docker exec supabase-db psql -U postgres -q -f "/docker-entrypoint-initdb.d/$f" >/dev/null 2>&1 || true
+  done
+  # An interrupted init also leaves auth/storage objects owned by
+  # supabase_admin (gotrue then fails with "must be owner of function uid")
+  # and no graphql_public schema (PostgREST fails its schema cache).
+  docker exec -i supabase-db psql -U postgres >/dev/null 2>&1 <<'SQL' || true
+CREATE SCHEMA IF NOT EXISTS graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO postgres, anon, authenticated, service_role;
+ALTER SCHEMA auth OWNER TO supabase_auth_admin;
+ALTER SCHEMA storage OWNER TO supabase_storage_admin;
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT p.oid::regprocedure AS f FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='auth' LOOP
+    EXECUTE format('ALTER FUNCTION %s OWNER TO supabase_auth_admin', r.f);
+  END LOOP;
+  FOR r IN SELECT c.oid::regclass AS t FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='auth' AND c.relkind IN ('r','p') LOOP
+    EXECUTE format('ALTER TABLE %s OWNER TO supabase_auth_admin', r.t);
+  END LOOP;
+  FOR r IN SELECT c.oid::regclass AS t FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='storage' AND c.relkind IN ('r','p') LOOP
+    EXECUTE format('ALTER TABLE %s OWNER TO supabase_storage_admin', r.t);
+  END LOOP;
+END $$;
+SQL
+  supabase_db_initialised || { err "could not initialise the Supabase database - inspect 'docker logs supabase-db'"; exit 1; }
+  log "database repaired (roles, _supabase database, schema ownership)"
+}
+
 # ---- 4. Supabase (CORE) ----------------------------------------------------
 setup_supabase() {
   step "4/8  Supabase (core: auth + MFA)"
@@ -271,9 +331,13 @@ setup_supabase() {
     git clone --depth 1 --quiet https://github.com/supabase/supabase "$tmp/supabase"
     cp -r "$tmp/supabase/docker" "$SB_DIR"; rm -rf "$tmp"
   else log "supabase directory exists ($SB_DIR)"; fi
+  # The stack bind-mounts these configs into containers that run as non-root
+  # users (kong, gotrue, ...). They must stay world-readable whatever umask
+  # the installer inherited; .env is locked down again right below.
+  chmod -R a+rX "$SB_DIR"
 
   if [ ! -f "$SB_DIR/.env" ]; then
-    umask 077; cp "$SB_DIR/.env.example" "$SB_DIR/.env"; chmod 600 "$SB_DIR/.env"
+    cp "$SB_DIR/.env.example" "$SB_DIR/.env"; chmod 600 "$SB_DIR/.env"
     set_kv "$SB_DIR/.env" POSTGRES_PASSWORD  "$(cred_get POSTGRES_PASSWORD)"
     set_kv "$SB_DIR/.env" JWT_SECRET         "$(cred_get JWT_SECRET)"
     set_kv "$SB_DIR/.env" ANON_KEY           "$(cred_get ANON_KEY)"
@@ -321,6 +385,19 @@ services:
 EOF
     grep -qE '^COMPOSE_FILE=.*soteria-keycloak' "$SB_DIR/.env" || (cd "$SB_DIR" && sh run.sh config add soteria-keycloak >/dev/null)
   fi
+
+  # The database initialises ONCE, on its first start with an empty data dir:
+  # that pass creates the _supabase database and sets the passwords of
+  # authenticator / supabase_auth_admin / supabase_storage_admin / pgbouncer.
+  # If the container is recreated while that pass is still running (bringing
+  # the whole stack up at once, a compose-file change, an impatient re-run),
+  # postgres finds a non-empty data dir, logs "Skipping initialization" and
+  # those steps are silently lost - every service then crash-loops on
+  # 'password authentication failed for user "authenticator"'.
+  # So: start the db ALONE, wait for the init to actually land, then the rest.
+  log "starting the Supabase database (one-shot initialisation)"
+  compose "$SB_DIR" up -d db >/dev/null 2>&1 || compose "$SB_DIR" up -d db
+  wait_supabase_db
 
   log "starting Supabase (first run pulls ~10 images, this can take a while)"
   (cd "$SB_DIR" && sh run.sh start >/dev/null 2>&1 || docker compose up -d)
@@ -442,11 +519,14 @@ setup_keycloak() {
 
   [ -z "$(cred_get KEYCLOAK_ADMIN_PASSWORD)" ] && cred_set KEYCLOAK_ADMIN_PASSWORD "$(gen_pw)"
   mkdir -p "$KC_DIR"
-  umask 077
-  cat > "$KC_DIR/.env" <<EOF
+  # subshell again: a leaked 077 would also lock down the nginx.conf and certs
+  # written later in build_up (see cred_init).
+  ( umask 077
+    cat > "$KC_DIR/.env" <<EOF
 KC_ADMIN_PASSWORD=$(cred_get KEYCLOAK_ADMIN_PASSWORD)
 PUBLIC_HOST=${PUBLIC_HOST}
 EOF
+  )
   chmod 600 "$KC_DIR/.env"
   [ -f "$KC_DIR/docker-compose.yml" ] || cat > "$KC_DIR/docker-compose.yml" <<'EOF'
 services:
