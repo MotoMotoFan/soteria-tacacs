@@ -144,30 +144,62 @@ detect_lan_ip() {
 
 compose() { (cd "$1" && shift && docker compose "$@"); }
 
+# A freshly booted Ubuntu/Debian runs unattended-upgrades, which holds the dpkg
+# lock for several minutes. apt-get then blocks with no output of its own and
+# the installer looks hung on step 1, so wait out loud instead.
+# Test the lock file itself: the process name is not a usable signal -
+# unattended-upgrade-shutdown runs permanently and holds nothing.
+wait_apt_lock() {
+  have flock || return 0
+  [ -e /var/lib/dpkg/lock-frontend ] || return 0
+  local waited=0
+  while ! $SUDO flock -n /var/lib/dpkg/lock-frontend -c true >/dev/null 2>&1; do
+    [ "$waited" -eq 0 ] && warn "another package manager holds the apt lock (unattended-upgrades on a freshly booted host) - waiting for it to finish"
+    sleep 5; waited=$((waited+5))
+    [ $((waited % 60)) -eq 0 ] && log "still waiting for the apt lock (${waited}s)"
+    [ "$waited" -ge 900 ] && { err "apt still locked after 15 min - inspect: ps aux | grep -E 'apt|dpkg'"; exit 1; }
+  done
+  [ "$waited" -gt 0 ] && log "apt lock released after ${waited}s"
+  return 0
+}
+
 # ---- 1. prerequisites ------------------------------------------------------
 install_prereqs() {
   step "1/8  Prerequisites"
   if [ "$SKIP_PREREQS" -eq 1 ]; then warn "skipping prereqs (--skip-prereqs)"; return; fi
+  log "this step installs Docker and base packages - allow a few minutes on a fresh host"
 
   local pkgmgr=""
   if have apt-get; then pkgmgr=apt; elif have dnf; then pkgmgr=dnf; elif have yum; then pkgmgr=yum; fi
   [ -z "$pkgmgr" ] && { err "unsupported distro (need apt or dnf/yum). Install Docker + openssl manually."; exit 1; }
 
   case "$pkgmgr" in
-    apt) $SUDO apt-get update -qq; $SUDO apt-get install -y -qq ca-certificates curl gnupg git openssl netcat-openbsd python3 >/dev/null ;;
-    dnf|yum) $SUDO "$pkgmgr" install -y -q curl git openssl nmap-ncat ca-certificates python3 >/dev/null ;;
+    apt)
+      wait_apt_lock
+      log "refreshing the package index"
+      $SUDO apt-get update -qq
+      log "installing base tools (ca-certificates, curl, gnupg, git, openssl, netcat, python3)"
+      $SUDO apt-get install -y -qq ca-certificates curl gnupg git openssl netcat-openbsd python3 >/dev/null ;;
+    dnf|yum)
+      log "installing base tools (curl, git, openssl, nmap-ncat, python3)"
+      $SUDO "$pkgmgr" install -y -q curl git openssl nmap-ncat ca-certificates python3 >/dev/null ;;
   esac
   log "base tools present (curl, git, openssl, python3)"
 
   if ! have docker; then
-    log "installing Docker Engine (get.docker.com)"
+    # ~500 MB of packages on a fresh host: by far the slowest part of the
+    # install. get.docker.com prints its own apt output, so leave it visible -
+    # silence here reads as a hang.
+    log "installing Docker Engine from get.docker.com - THIS IS THE SLOW PART (several minutes on a fresh host; output below is Docker's own)"
+    wait_apt_lock
     curl -fsSL https://get.docker.com | $SUDO sh
-  else log "docker present ($(docker --version))"; fi
+    log "Docker Engine installed"
+  else log "docker present ($(docker --version)) - skipping the slow Docker install"; fi
 
   if ! docker compose version >/dev/null 2>&1; then
-    warn "Docker Compose plugin missing"
+    warn "Docker Compose plugin missing - installing it"
     case "$pkgmgr" in
-      apt) $SUDO apt-get install -y -qq docker-compose-plugin >/dev/null || true ;;
+      apt) wait_apt_lock; $SUDO apt-get install -y -qq docker-compose-plugin >/dev/null || true ;;
       dnf|yum) $SUDO "$pkgmgr" install -y -q docker-compose-plugin >/dev/null || true ;;
     esac
   fi
