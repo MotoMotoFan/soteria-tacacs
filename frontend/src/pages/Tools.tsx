@@ -56,6 +56,17 @@ function ToolCard({ icon: Icon, title, description, children }: {
   );
 }
 
+// Optional shared-secret override: the tests default to the agent's
+// TACACS_KEY, which is wrong when the matched device block uses its own key.
+function KeyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Shared key (optional)</label>
+      <input className="input-field font-mono" placeholder="empty = TACACS_KEY from the agent environment" value={value} onChange={e => onChange(e.target.value)} />
+    </div>
+  );
+}
+
 function useTool<T>() {
   const [result, setResult] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,11 +89,12 @@ function useTool<T>() {
 function AuthTester() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [key, setKey] = useState('');
   const { result, error, running, run } = useTool<ToolResult>();
 
   return (
     <ToolCard icon={KeyRound} title="Authentication Test" description="PAP login against the live server (localhost:49)">
-      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.authTest(username.trim(), password)); }}>
+      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.authTest(username.trim(), password, key.trim())); }}>
         <div>
           <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Username</label>
           <input className="input-field font-mono" placeholder="e.g. network_readonly" value={username} onChange={e => setUsername(e.target.value)} />
@@ -91,6 +103,7 @@ function AuthTester() {
           <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Password</label>
           <input type="password" className="input-field font-mono" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
         </div>
+        <KeyField value={key} onChange={setKey} />
         <button type="submit" disabled={running || !username.trim() || !password} className="btn-primary flex items-center gap-2 text-sm">
           <Play className="w-4 h-4" /> {running ? 'Testing…' : 'Test Login'}
         </button>
@@ -104,11 +117,12 @@ function AuthzTester() {
   const [username, setUsername] = useState('');
   const [service, setService] = useState('shell');
   const [command, setCommand] = useState('');
+  const [key, setKey] = useState('');
   const { result, error, running, run } = useTool<ToolResult>();
 
   return (
     <ToolCard icon={Terminal} title="Command Authorization Test" description="Would the server permit this command for this user?">
-      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.authzTest(username.trim(), service.trim(), command.trim())); }}>
+      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.authzTest(username.trim(), service.trim(), command.trim(), key.trim())); }}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Username</label>
@@ -123,6 +137,7 @@ function AuthzTester() {
           <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Command</label>
           <input className="input-field font-mono" placeholder="e.g. show running-config (empty = session/priv-lvl check)" value={command} onChange={e => setCommand(e.target.value)} />
         </div>
+        <KeyField value={key} onChange={setKey} />
         <button type="submit" disabled={running || !username.trim()} className="btn-primary flex items-center gap-2 text-sm">
           <Play className="w-4 h-4" /> {running ? 'Testing…' : 'Test Authorization'}
         </button>
@@ -139,11 +154,12 @@ function TraceTester() {
   const [service, setService] = useState('shell');
   const [command, setCommand] = useState('');
   const [group, setGroup] = useState('');
+  const [key, setKey] = useState('');
   const { result, error, running, run } = useTool<TraceResult>();
 
   return (
     <ToolCard icon={Route} title="AAA Trace" description="Trace an auth decision through the live rules (tactrace.pl)">
-      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.traceTest(mode, username.trim(), password, service.trim(), command.trim(), group.trim())); }}>
+      <form className="space-y-4" onSubmit={e => { e.preventDefault(); void run(() => api.traceTest(mode, username.trim(), password, service.trim(), command.trim(), group.trim(), key.trim())); }}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--s-text)' }}>Mode</label>
@@ -181,6 +197,7 @@ function TraceTester() {
             </div>
           </div>
         )}
+        <KeyField value={key} onChange={setKey} />
         <button type="submit" disabled={running || !username.trim() || (mode === 'authc' && !password)} className="btn-primary flex items-center gap-2 text-sm">
           <Play className="w-4 h-4" /> {running ? 'Tracing…' : 'Run Trace'}
         </button>

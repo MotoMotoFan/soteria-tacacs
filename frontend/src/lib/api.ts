@@ -404,15 +404,17 @@ export const api = {
   validateConfig: () => request<{ status: string; output: string }>('POST', '/api/config/validate'),
   reloadConfig: () => request<{ status: string }>('POST', '/api/config/reload'),
 
-  // Diagnostic tools - all run inside the TACACS server container
-  authTest: (username: string, password: string) =>
-    request<ToolResult>('POST', '/api/tools/auth-test', { username, password }),
-  authzTest: (username: string, service: string, command: string) =>
-    request<ToolResult>('POST', '/api/tools/authz-test', { username, service, command }),
+  // Diagnostic tools - all run inside the TACACS server container.
+  // key is optional: empty = the agent's TACACS_KEY; set it to test a device
+  // configured with a different shared secret.
+  authTest: (username: string, password: string, key = '') =>
+    request<ToolResult>('POST', '/api/tools/auth-test', { username, password, key }),
+  authzTest: (username: string, service: string, command: string, key = '') =>
+    request<ToolResult>('POST', '/api/tools/authz-test', { username, service, command, key }),
   pingTest: (target: string, count: number) =>
     request<PingResult>('POST', '/api/tools/ping', { target, count }),
-  traceTest: (mode: string, username: string, password: string, service: string, command: string, group: string) =>
-    request<TraceResult>('POST', '/api/tools/trace', { mode, username, password, service, command, group }),
+  traceTest: (mode: string, username: string, password: string, service: string, command: string, group: string, key = '') =>
+    request<TraceResult>('POST', '/api/tools/trace', { mode, username, password, service, command, group, key }),
 
   // API tokens (managed via a web session; API tokens cannot mint tokens)
   listApiTokens: () => request<ApiToken[]>('GET', '/api/tokens'),

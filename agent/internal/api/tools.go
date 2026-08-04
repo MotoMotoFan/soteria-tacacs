@@ -52,10 +52,22 @@ func validToolName(s string) bool {
 	return !strings.ContainsAny(s, " \t\r\n\x00")
 }
 
+// toolKey resolves the shared secret for a test: the caller-supplied key when
+// set (e.g. testing a device with a per-device key), TACACS_KEY otherwise.
+func (s *Server) toolKey(override string) (string, error) {
+	if override == "" {
+		return s.GlobalKey, nil
+	}
+	if len(override) > 256 || strings.ContainsAny(override, "\t\r\n\x00") {
+		return "", fmt.Errorf("invalid shared key")
+	}
+	return override, nil
+}
+
 // runToolScript executes a perl one-liner in the server container and maps
 // the VERDICT\nmessage... convention into a toolResult.
-func (s *Server) runToolScript(ctx context.Context, script string, args []string) (*toolResult, error) {
-	cmd := append([]string{"perl", "-e", script, "--", s.GlobalKey}, args...)
+func (s *Server) runToolScript(ctx context.Context, script, key string, args []string) (*toolResult, error) {
+	cmd := append([]string{"perl", "-e", script, "--", key}, args...)
 	start := time.Now()
 	// stdout carries our VERDICT line; the TACACS+ perl client prints
 	// warnings to stderr that would otherwise corrupt the first line.
@@ -95,6 +107,7 @@ func (s *Server) authTest(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Key      string `json:"key"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -103,9 +116,14 @@ func (s *Server) authTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("username and password are required"))
 		return
 	}
+	key, err := s.toolKey(body.Key)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	res, err := s.runToolScript(ctx, authTestScript, []string{body.Username, body.Password})
+	res, err := s.runToolScript(ctx, authTestScript, key, []string{body.Username, body.Password})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -119,6 +137,7 @@ func (s *Server) authzTest(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Service  string `json:"service"`
 		Command  string `json:"command"`
+		Key      string `json:"key"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -132,6 +151,11 @@ func (s *Server) authzTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validToolName(body.Service) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid service name"))
+		return
+	}
+	key, err := s.toolKey(body.Key)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	// "show running-config" → cmd=show, cmd-arg=running-config (one per word,
@@ -149,7 +173,7 @@ func (s *Server) authzTest(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	res, err := s.runToolScript(ctx, authzTestScript, append([]string{body.Username}, av...))
+	res, err := s.runToolScript(ctx, authzTestScript, key, append([]string{body.Username}, av...))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -215,12 +239,18 @@ func (s *Server) traceTest(w http.ResponseWriter, r *http.Request) {
 		Service  string `json:"service"`
 		Command  string `json:"command"`
 		Group    string `json:"group"` // optional: trace as a temp member of this group
+		Key      string `json:"key"`   // optional: shared secret override
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
 	if !validToolName(body.Username) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("username is required"))
+		return
+	}
+	key, err := s.toolKey(body.Key)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if body.Group != "" && !validToolName(body.Group) {
@@ -262,7 +292,7 @@ func (s *Server) traceTest(w http.ResponseWriter, r *http.Request) {
 	args := []string{
 		"/usr/local/bin/tactrace.pl",
 		"--conf=" + tactraceConfigPath,
-		"--key=" + s.GlobalKey,
+		"--key=" + key,
 		"--nad=127.0.0.1",
 		"--username=" + body.Username,
 		"--mode=" + mode,
