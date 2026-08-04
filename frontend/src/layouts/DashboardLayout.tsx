@@ -6,6 +6,7 @@ import TopBar from '../components/TopBar';
 import RollbackModal from '../components/RollbackModal';
 import DiffModal from '../components/DiffModal';
 import ErrorBoundary from '../components/ErrorBoundary';
+import Footer from '../components/Footer';
 import { useConfigMode } from '../components/ConfigModeProvider';
 import { AlertTriangle, Check, RotateCcw, GitCompare, X } from 'lucide-react';
 import { FILE_SECTIONS } from '../lib/api';
@@ -92,10 +93,11 @@ export default function DashboardLayout() {
             <button onClick={clearMessages} className="p-0.5 shrink-0" style={{ color: 'var(--s-muted)' }}><X className="w-3.5 h-3.5" /></button>
           </div>
         )}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 flex flex-col">
           <ErrorBoundary resetKey={location.pathname}>
             <Outlet />
           </ErrorBoundary>
+          <Footer />
         </main>
         <RollbackModal open={rollbackOpen} onClose={() => setRollbackOpen(false)} />
         <DiffModal open={diffOpen} onClose={() => setDiffOpen(false)} />
