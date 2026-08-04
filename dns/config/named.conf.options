@@ -1,12 +1,17 @@
 options {
     directory "/var/cache/bind";
 
-    // Authoritative only: never resolve names we are not master for.
-    recursion no;
+    // Authoritative for the lab zones + recursive resolver for LAN clients
+    // (lab PCs point their DNS at this server, so it must also resolve
+    // internet names like the Cloudflare tunnel hostname).
+    recursion yes;
     allow-query { any; };
+    allow-recursion { 127.0.0.1; 192.168.1.0/24; 10.250.0.0/16; };
+    forwarders { 1.1.1.1; 8.8.8.8; };
     allow-transfer { none; };
 
-    // Without recursion there is no upstream to validate against.
+    // Forwarders do the validation; keep it off locally to avoid breakage
+    // behind the lab network.
     dnssec-validation no;
 
     // We serve a specific RFC1918 reverse zone; don't let BIND's automatic
