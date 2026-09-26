@@ -34,6 +34,9 @@
 #   sudo ./install.sh --with-cert-trust / --without-cert-trust
 #       install the generated cert into the HOST trust store so local tools
 #       (cloudflared, curl, scripts) verify TLS without -k / "No TLS Verify"
+#   sudo SUPABASE_REF=<commit|branch> ./install.sh
+#       fetch a different Supabase revision than the tested pin (fresh
+#       installs only - an existing supabase/ directory is left alone)
 # =============================================================================
 set -euo pipefail
 
@@ -48,6 +51,14 @@ OB_DIR="${DEPS_DIR}/openbao"
 KC_DIR="${DEPS_DIR}/keycloak"
 PX_DIR="${DEPS_DIR}/nginx"
 NETWORK="soteria-net"
+# Self-hosted Supabase is fetched from upstream at install time. Pin it: the
+# stack layout changes under us otherwise (upstream renamed the `kong` service
+# to `api-gw` when Envoy became the default gateway, which broke every fresh
+# install). Bump deliberately after testing; SUPABASE_REF=master tracks
+# upstream at your own risk.
+SUPABASE_REPO="https://github.com/supabase/supabase"
+SUPABASE_REF="${SUPABASE_REF:-36371de15127206280d2d40786e8578dfe1b681a}"
+OPENBAO_IMAGE="${OPENBAO_IMAGE:-openbao/openbao:2.7.0}"
 ADMIN_EMAIL_DEFAULT="admin@soteria.lab"
 ADMIN_PW_DEFAULT="Admin@123"
 
@@ -310,6 +321,15 @@ ensure_network() {
   else docker network create "$NETWORK" >/dev/null && log "created network '$NETWORK'"; fi
 }
 
+# Host port of the Supabase API gateway. Upstream renamed KONG_HTTP_PORT to
+# API_GW_HTTP_PORT (the compose file still falls back to the old name).
+sb_gw_port() {
+  local p
+  p=$(get_kv "$SB_DIR/.env" API_GW_HTTP_PORT)
+  [ -n "$p" ] || p=$(get_kv "$SB_DIR/.env" KONG_HTTP_PORT)
+  echo "${p:-8000}"
+}
+
 # A usable Supabase database is one where the init pass has run: the service
 # roles must actually have passwords (postgres itself gets its password from
 # initdb, so 'db is healthy' proves nothing about the rest).
@@ -369,9 +389,15 @@ SQL
 setup_supabase() {
   step "4/8  Supabase (core: auth + MFA)"
   if [ ! -d "$SB_DIR" ]; then
-    log "fetching self-hosted Supabase stack"
+    log "fetching self-hosted Supabase stack (${SUPABASE_REF})"
+    # Only docker/ is needed - a sparse, shallow fetch of the pinned revision
+    # instead of cloning the whole monorepo.
     local tmp; tmp=$(mktemp -d)
-    git clone --depth 1 --quiet https://github.com/supabase/supabase "$tmp/supabase"
+    git -C "$tmp" init -q supabase
+    git -C "$tmp/supabase" sparse-checkout set docker
+    git -C "$tmp/supabase" fetch -q --depth 1 --filter=blob:none "$SUPABASE_REPO" "$SUPABASE_REF" \
+      || { err "could not fetch Supabase ${SUPABASE_REF} from ${SUPABASE_REPO}"; rm -rf "$tmp"; exit 1; }
+    git -C "$tmp/supabase" -c advice.detachedHead=false checkout -q FETCH_HEAD
     cp -r "$tmp/supabase/docker" "$SB_DIR"; rm -rf "$tmp"
   else log "supabase directory exists ($SB_DIR)"; fi
   # The stack bind-mounts these configs into containers that run as non-root
@@ -394,22 +420,35 @@ setup_supabase() {
     log "supabase .env configured from recorded credentials"
   else log "supabase .env exists - keeping it"; fi
 
-  # Kong must join soteria-net or the frontend's /supabase proxy 502s. The
-  # stack layers overrides via COMPOSE_FILE in .env (run.sh manages it) - the
+  # The API gateway must join soteria-net or the frontend's /supabase proxy
+  # 502s. Its service is `api-gw` since upstream made Envoy the default (the
+  # opt-in Kong override reuses that name) and `kong` before that; an override
+  # naming a service the base file lacks is an imageless service and makes
+  # EVERY compose command fail ("service kong has neither an image nor a
+  # build context"). So ask the base file which one it has. The frontend
+  # proxies to kong:8000, hence the alias on soteria-net.
+  # Overrides are layered via COMPOSE_FILE in .env (run.sh manages it) - the
   # docker-compose.override.yml auto-include does NOT apply here.
-  cat > "$SB_DIR/docker-compose.soteria-net.yml" <<'EOF'
-# Attach Kong to the shared soteria-net so the Soteria frontend can proxy
-# /supabase -> kong:8000. Registered in .env via: sh run.sh config add soteria-net
+  local gw
+  gw=$(cd "$SB_DIR" && docker compose -f docker-compose.yml config --services 2>/dev/null | grep -xE 'api-gw|kong' | head -1)
+  [ -n "$gw" ] || gw=$(grep -oE '^  (api-gw|kong):' "$SB_DIR/docker-compose.yml" | head -1 | tr -d ' :')
+  [ -n "$gw" ] || { err "no API gateway service (api-gw/kong) in $SB_DIR/docker-compose.yml - unsupported Supabase layout"; exit 1; }
+  cat > "$SB_DIR/docker-compose.soteria-net.yml" <<EOF
+# Attach the Supabase API gateway (${gw}) to the shared soteria-net so the
+# Soteria frontend can proxy /supabase -> kong:8000. Written by install.sh;
+# registered in .env via: sh run.sh config add soteria-net
 services:
-  kong:
+  ${gw}:
     networks:
       default: {}
-      soteria-net: {}
+      soteria-net:
+        aliases: [kong]
 
 networks:
   soteria-net:
     external: true
 EOF
+  log "API gateway service '${gw}' attached to ${NETWORK} (alias kong)"
   grep -qE '^COMPOSE_FILE=.*soteria-net' "$SB_DIR/.env" || (cd "$SB_DIR" && sh run.sh config add soteria-net >/dev/null)
 
   # GoTrue <-> Keycloak wiring rides in a second override (only when chosen)
@@ -428,6 +467,9 @@ services:
 EOF
     grep -qE '^COMPOSE_FILE=.*soteria-keycloak' "$SB_DIR/.env" || (cd "$SB_DIR" && sh run.sh config add soteria-keycloak >/dev/null)
   fi
+  # run.sh rewrites .env when it edits COMPOSE_FILE and the rewrite comes out
+  # world-readable - it holds the postgres password and the service role key.
+  chmod 600 "$SB_DIR/.env"
 
   # The database initialises ONCE, on its first start with an empty data dir:
   # that pass creates the _supabase database and sets the passwords of
@@ -445,22 +487,29 @@ EOF
   log "starting Supabase (first run pulls ~10 images, this can take a while)"
   (cd "$SB_DIR" && sh run.sh start >/dev/null 2>&1 || docker compose up -d)
 
-  local anon kong_port; anon=$(cred_get ANON_KEY); kong_port=$(get_kv "$SB_DIR/.env" KONG_HTTP_PORT); kong_port="${kong_port:-8000}"
+  local anon gw_port; anon=$(cred_get ANON_KEY); gw_port=$(sb_gw_port)
   local i=0
-  until curl -fsS -H "apikey: ${anon}" "http://localhost:${kong_port}/auth/v1/health" >/dev/null 2>&1; do
-    i=$((i+1)); [ "$i" -gt 60 ] && { err "Supabase did not become healthy in 3 min - check 'docker ps' / kong logs"; exit 1; }
+  until curl -fsS -H "apikey: ${anon}" "http://localhost:${gw_port}/auth/v1/health" >/dev/null 2>&1; do
+    i=$((i+1)); [ "$i" -gt 60 ] && { err "Supabase did not become healthy in 3 min - check 'docker ps' / the API gateway logs"; exit 1; }
     sleep 3
   done
-  log "Supabase healthy (kong :${kong_port})"
+  log "Supabase healthy (API gateway :${gw_port})"
 }
 
 # ---- 5. OpenBao (CORE) -----------------------------------------------------
 setup_openbao() {
   step "5/8  OpenBao (core: secret storage)"
   mkdir -p "$OB_DIR/config"
+  # Integrated (raft) storage: OpenBao 2.7 dropped the "file" backend this
+  # installer used before ("unknown storage type file" -> crash loop), and
+  # raft is the supported single-node setup anyway. Existing installs keep
+  # their file-backed config below (it is only written when absent) - do not
+  # move those to a >= 2.7 image without 'bao operator migrate'.
   [ -f "$OB_DIR/config/openbao.hcl" ] || cat > "$OB_DIR/config/openbao.hcl" <<'EOF'
 ui = true
-api_addr = "http://openbao:8200"
+api_addr     = "http://openbao:8200"
+cluster_addr = "https://127.0.0.1:8201"   # single node: raft only talks to itself
+disable_mlock = true                      # recommended with integrated storage
 listener "tcp" {
   address     = "0.0.0.0:8200"
   tls_disable = 1   # internal soteria-net only; TLS terminates at the proxy
@@ -468,14 +517,16 @@ listener "tcp" {
 # /openbao/file is the image's canonical data path - its entrypoint chowns it
 # for the openbao user before dropping privileges (a custom path stays root-owned
 # and init fails with "permission denied").
-storage "file" {
-  path = "/openbao/file"
+storage "raft" {
+  path    = "/openbao/file"
+  node_id = "openbao-1"
 }
 EOF
-  [ -f "$OB_DIR/docker-compose.yml" ] || cat > "$OB_DIR/docker-compose.yml" <<'EOF'
+  # Pinned for the same reason as SUPABASE_REF: `latest` changed under us.
+  [ -f "$OB_DIR/docker-compose.yml" ] || cat > "$OB_DIR/docker-compose.yml" <<EOF
 services:
   openbao:
-    image: openbao/openbao:latest
+    image: ${OPENBAO_IMAGE}
     container_name: openbao
     restart: unless-stopped
     # entrypoint chowns the data volume then drops privileges to the openbao user
@@ -741,11 +792,11 @@ SQL
 
   # First administrator. Created WITH app_metadata.role=admin - without it the
   # account can sign in but has no rights anywhere in the UI.
-  local srk kong_port code
+  local srk gw_port code
   srk=$(cred_get SERVICE_ROLE_KEY)
-  kong_port=$(get_kv "$SB_DIR/.env" KONG_HTTP_PORT); kong_port="${kong_port:-8000}"
+  gw_port=$(sb_gw_port)
   code=$(curl -s -o /tmp/soteria-admin-create.json -w '%{http_code}' \
-    -X POST "http://localhost:${kong_port}/auth/v1/admin/users" \
+    -X POST "http://localhost:${gw_port}/auth/v1/admin/users" \
     -H "apikey: ${srk}" -H "Authorization: Bearer ${srk}" -H "Content-Type: application/json" \
     -d "{\"email\":\"$(cred_get WEBUI_ADMIN_EMAIL)\",\"password\":\"$(cred_get WEBUI_ADMIN_PASSWORD)\",\"email_confirm\":true,\"app_metadata\":{\"role\":\"admin\",\"group\":\"Administrator\"}}")
   case "$code" in
@@ -758,10 +809,10 @@ SQL
       log "administrator $(cred_get WEBUI_ADMIN_EMAIL) already exists - ensuring admin role"
       if have python3; then
         local uid
-        uid=$(curl -fsS "http://localhost:${kong_port}/auth/v1/admin/users?per_page=200" \
+        uid=$(curl -fsS "http://localhost:${gw_port}/auth/v1/admin/users?per_page=200" \
                 -H "apikey: ${srk}" -H "Authorization: Bearer ${srk}" \
               | python3 -c "import json,sys; email='$(cred_get WEBUI_ADMIN_EMAIL)'; users=json.load(sys.stdin).get('users',[]); print(next((u['id'] for u in users if u.get('email')==email),''))")
-        [ -n "$uid" ] && curl -fsS -X PUT "http://localhost:${kong_port}/auth/v1/admin/users/${uid}" \
+        [ -n "$uid" ] && curl -fsS -X PUT "http://localhost:${gw_port}/auth/v1/admin/users/${uid}" \
             -H "apikey: ${srk}" -H "Authorization: Bearer ${srk}" -H "Content-Type: application/json" \
             -d '{"app_metadata":{"role":"admin","group":"Administrator"}}' >/dev/null && log "admin role confirmed"
       fi
@@ -774,7 +825,7 @@ SQL
   sleep 3
   local ap fp; ap="$(get_env AGENT_LISTEN_PORT)"; ap="${ap:-8081}"; fp="$(get_env FRONTEND_LISTEN_PORT)"; fp="${fp:-8080}"
   if curl -fsS "http://localhost:${ap}/ready" >/dev/null 2>&1; then log "agent /ready OK (:$ap)"; else warn "agent /ready not responding yet (:$ap)"; fi
-  docker ps --format '  {{.Names}}\t{{.Status}}' | grep -E 'soteria|bind9|supabase-kong|openbao|keycloak' || true
+  docker ps --format '  {{.Names}}\t{{.Status}}' | grep -E 'soteria|bind9|supabase-(kong|envoy)|openbao|keycloak' || true
 
   echo ""
   echo -e "${c_b}Done.${c_0}"
